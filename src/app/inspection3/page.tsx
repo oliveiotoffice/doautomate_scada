@@ -2,17 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import React from "react";
-import type { InspectionApiPayload } from '../../lib/inspectionDataService';
+import type { InspectionApiPayload, PlcPinStatus } from '../../lib/inspectionDataService';
 import { Activity, ArrowRight, CheckCircle2, Gauge, Maximize2, QrCode, ScanLine, X, XCircle } from "lucide-react";
 import { useTheme } from "./components/ThemeContext";
-import { useRouter } from "next/navigation";
-
-const CURRENT_MODEL_NO = "6630862";
-const MODEL_ROUTES: Record<string, string> = {
-  "6630865": "/inspection1",
-  "6630867": "/inspection2",
-  "6630862": "/inspection3",
-};
 /* ═══════════════════════════════════════════════════════════
   DATA
 ═══════════════════════════════════════════════════════════ */
@@ -78,9 +70,11 @@ function isPass(req: number | null, tol: number | null, val: number | null): boo
   if (req === null || tol === null || val === null) return true;
   return val >= req - tol && val <= req + tol;
 }
-function genPins(count: number, seed: number): boolean[] {
-  return Array.from({ length: count }, (_, i) => ((seed * 31 + i * 17 + count * 7) % 100) > 12);
-}
+const empty15PinStatuses = (): PlcPinStatus[] => Array.from({ length: 15 }, () => null);
+const empty3PinStatuses = (): PlcPinStatus[] => Array.from({ length: 3 }, () => null);
+const pinStatusLabel = (status: PlcPinStatus) => status === 4 ? "OK" : status === 5 ? "NG" : status === 2 ? "LOAD" : "-";
+const pinStatusTone = (status: PlcPinStatus, C: T) => status === 4 ? C.ok : status === 5 ? C.ng : status === 2 ? "#f97316" : C.txtMid;
+const pinStatusSoftTone = (status: PlcPinStatus, C: T) => status === 4 ? C.okSoft : status === 5 ? C.ngSoft : status === 2 ? "rgba(249,115,22,0.14)" : C.cellNeutral;
 
 /* ═══════════════════════════════════════════════════════════
   THEME
@@ -826,8 +820,18 @@ function Station01Panel({
 /* ═══════════════════════════════════════════════════════════
   STATION 02 — pin matrix layout
 ═══════════════════════════════════════════════════════════ */
-function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
-  type PinCell = { n: number; pass: boolean; label: string };
+function Station02Panel({
+  pinStatuses,
+  smallPinStatuses,
+  specialStatuses,
+  C,
+}: {
+  pinStatuses: PlcPinStatus[];
+  smallPinStatuses: PlcPinStatus[];
+  specialStatuses: PlcPinStatus[];
+  C: T;
+}) {
+  type PinCell = { n: number; status: PlcPinStatus; label: string };
 
   const first6 = genPins(6, pinSeed);
   const second6 = genPins(6, pinSeed + 50);
@@ -1959,8 +1963,6 @@ export default function Dashboard() {
   const [ngCount, setNgCount] = useState(0);
   const [hoveredStation, setHoveredStation] = useState<number | null>(null);
   const [fullscreenView, setFullscreenView] = useState<"front" | "bottom" | null>(null);
-  const router = useRouter();
-
   const stationIds = stations.map(s => s.id);
   const nextId = (id: number) => {
     const idx = stationIds.indexOf(id);
@@ -1972,17 +1974,11 @@ export default function Dashboard() {
 
     const refresh = async () => {
       try {
-        const response = await fetch(`/api/inspection/current?modelNo=${encodeURIComponent(CURRENT_MODEL_NO)}`, { cache: "no-store" });
+        const response = await fetch(`/api/inspection/current`, { cache: "no-store" });
         if (!response.ok) throw new Error("Inspection API request failed");
 
         const data: InspectionApiPayload = await response.json();
         if (!alive) return;
-
-        const activeRoute = MODEL_ROUTES[data.modelNo];
-        if (activeRoute && data.modelNo !== CURRENT_MODEL_NO) {
-          router.replace(activeRoute);
-          return;
-        }
 
         setActuals(data.actuals);
         setInspectionData(data);
@@ -1996,12 +1992,12 @@ export default function Dashboard() {
     };
 
     refresh();
-    const iv = setInterval(refresh, 1800);
+    const iv = setInterval(refresh, 5000);
     return () => {
       alive = false;
       clearInterval(iv);
     };
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     if (!fullscreenView) return;

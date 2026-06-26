@@ -7,10 +7,10 @@ const {
   wordsToDateTime,
   wordsToFloat,
   wordsToString,
-  wordsToUInt32,
+  wordsToUInt64,
 } = require("./plc-layout");
 
-const MODEL_END = 10399;
+const MODEL_END = 10699;
 const READ_COUNT = MODEL_END - AREA_START + 1;
 const DEFAULT_READ_INTERVAL_MS = 3000;
 const DEFAULT_ERROR_DELAY_MS = 10000;
@@ -89,8 +89,8 @@ function decodeCommon(area) {
   return {
     shift: getWords(area, 10000, 1)[0],
     operator: wordsToString(getWords(area, 10001, 10)),
-    modelNo: wordsToUInt32(...getWords(area, 10011, 2)),
-    componentNo: wordsToUInt32(...getWords(area, 10013, 2)),
+    modelNo: getWords(area, 10011, 1)[0],
+    componentNo: wordsToUInt64(getWords(area, 10012, 4)),
     rtc,
     total: getWords(area, 10030, 1)[0],
     ok: getWords(area, 10031, 1)[0],

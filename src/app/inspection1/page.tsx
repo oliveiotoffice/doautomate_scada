@@ -5,14 +5,6 @@ import React from "react";
 import type { InspectionApiPayload, PlcPinStatus } from '../../lib/inspectionDataService';
 import { Activity, ArrowRight, CheckCircle2, Gauge, Maximize2, QrCode, ScanLine, X, XCircle } from "lucide-react";
 import { useTheme } from "./components/ThemeContext";
-import { useRouter } from "next/navigation";
-// Current model for this PLC-backed screen.
-const CURRENT_MODEL_NO = "6630865";
-const MODEL_ROUTES: Record<string, string> = {
-  "6630865": "/inspection1",
-  "6630867": "/inspection2",
-  "6630862": "/inspection3",
-};
 /* ═══════════════════════════════════════════════════════════
   DATA
 ═══════════════════════════════════════════════════════════ */
@@ -23,9 +15,9 @@ const stations = [
       { name: "Shaft OD (Left)", req: 35, tol: 0.025, unit: "mm" },
       { name: "Shaft OD (Right)", req: 35, tol: 0.025, unit: "mm" },
       { name: "Overall Length", req: 466, tol: 0.1, unit: "mm" },
-      { name: "Dowel CF (Left)", req: 26.9, tol: 0.1, unit: "mm" },
-      { name: "Dowel CF (Right)", req: 26.9, tol: 0.1, unit: "mm" },
-      { name: "12.2mm Diameter", req: 12.2, tol: 0.025, unit: "mm" }
+      { name: "Dowel Length", req: 459, tol: 0.1, unit: "mm" },
+      { name: "12.2mm Diameter", req: 12.2, tol: 0.025, unit: "mm" },
+      { name: "Gauge Dowel to Dowel", req: 445.1345, tol: 0.0005, unit: "mm" }
     ],
   },
   {
@@ -736,17 +728,17 @@ function Station01Panel({
   const shaftL = actuals[0] ?? null;
   const shaftR = actuals[1] ?? null;
   const oaLen = actuals[2] ?? null;
-  const dowelL = actuals[3] ?? null;
-  const dowelR = actuals[4] ?? null;
-  const dia122 = actuals[5] ?? null;
+  const dowelLength = actuals[3] ?? null;
+  const apg122 = actuals[4] ?? null;
+  const gaugeDowelToDowel = actuals[5] ?? null;
   const results = [
     isPass(p[0].req, p[0].tol, shaftL),
     isPass(p[1].req, p[1].tol, shaftR),
     isPass(p[2].req, p[2].tol, oaLen),
-    isPass(p[3].req, p[3].tol, dowelL),
-    isPass(p[5].req, p[5].tol, dia122),
+    isPass(p[3].req, p[3].tol, dowelLength),
+    isPass(p[4].req, p[4].tol, apg122),
     null,
-    isPass(p[4].req, p[4].tol, dowelR),
+    isPass(p[5].req, p[5].tol, gaugeDowelToDowel),
   ];
   const okCount = results.filter(result => result === true).length;
   const ngCount = results.filter(result => result === false).length;
@@ -875,8 +867,8 @@ function Station01Panel({
 
         <ValCell
           id="dowelCfLeft"
-          value={dowelL !== null ? dowelL.toFixed(3) : "—"}
-          pass={isPass(p[3].req, p[3].tol, dowelL)}
+          value={dowelLength !== null ? dowelLength.toFixed(3) : "—"}
+          pass={isPass(p[3].req, p[3].tol, dowelLength)}
           unit={p[3].unit}
           label="Calc"
           rangeLabel="458.900-459.100"
@@ -886,11 +878,11 @@ function Station01Panel({
 
         <ValCell
           id="diameter122"
-          value={dia122 !== null ? dia122.toFixed(3) : "—"}
-          pass={isPass(p[5].req, p[5].tol, dia122)}
-          unit={p[5].unit}
+          value={apg122 !== null ? apg122.toFixed(3) : "—"}
+          pass={isPass(p[4].req, p[4].tol, apg122)}
+          unit={p[4].unit}
           label="APG"
-          rangeLabel="12.2-12.4"
+          rangeLabel="12.175-12.225"
           fontSize={station01ValueFont}
           C={C}
         />
@@ -899,9 +891,9 @@ function Station01Panel({
 
         <ValCell
           id="dowelCfRight"
-          value={dowelR !== null ? dowelR.toFixed(3) : "—"}
-          pass={isPass(p[4].req, p[4].tol, dowelR)}
-          unit={p[4].unit}
+          value={gaugeDowelToDowel !== null ? gaugeDowelToDowel.toFixed(3) : "—"}
+          pass={isPass(p[5].req, p[5].tol, gaugeDowelToDowel)}
+          unit={p[5].unit}
           label="Guage"
           rangeLabel="445.134-445.135"
           fontSize={station01ValueFont}
@@ -1375,6 +1367,8 @@ type DiagramSvgProps = {
   C: T;
   actuals: Record<number, Record<number, number | null>>;
   pinStatuses: PlcPinStatus[];
+  smallPinStatuses: PlcPinStatus[];
+  specialStatuses: PlcPinStatus[];
 };
 
 const svgStatusColor = (pass: boolean | null, C: T) => pass === false ? C.ng : C.svgRing;
@@ -1388,7 +1382,9 @@ const frontPinPoints = [
 ];
 
 
-function FrontDiagramSvg({ C, pinStatuses }: DiagramSvgProps) {
+function FrontDiagramSvg({ C, actuals, pinStatuses }: DiagramSvgProps) {
+  const st1 = stations[0];
+  const st1a = actuals[1] ?? {};
   return (
     <svg
       viewBox="0 0 1100 300"
@@ -1435,30 +1431,38 @@ function FrontDiagramSvg({ C, pinStatuses }: DiagramSvgProps) {
         x={480}
         y={250}
         label="Overall Length"
-        high="472"
-        low="470"
-        value="471"
+        high={svgSpecHigh(st1.params[2])}
+        low={svgSpecLow(st1.params[2])}
+        value={svgActualValue(st1.params[2], st1a[2])}
         C={C}
       />
       {/* ABove Dowel Lenth bottom  */}
       <line x1="90" y1="10" x2="995" y2="10" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" markerEnd="url(#arrow)" />
       <line x1="85" y1="5" x2="85" y2="100" stroke={C.svgLine} strokeWidth="1.5" />
       <line x1="1000" y1="5" x2="1000" y2="100" stroke={C.svgLine} strokeWidth="1.5" />
-         <SvgCard
+      <SvgCard
         x={480}
         y={-10}
         label="Dowel Length"
-        high="450"
-        low="448"
-        value="448"
+        high={svgSpecHigh(st1.params[3])}
+        low={svgSpecLow(st1.params[3])}
+        value={svgActualValue(st1.params[3], st1a[3])}
         C={C}
       />
 
 
       {/* 15pins 15pin1 continuously */}
-      {[82, 112, 142, 209, 245].map(cx => <circle key={cx} cx={cx} cy={145} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />)}
-      {[448, 485, 555, 585, 615].map(cx => <circle key={cx} cx={cx} cy={146} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />)}
-      {[770, 802, 835, 915, 960].map(cx => <circle key={cx} cx={cx} cy={147} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />)}
+      {frontPinPoints.map((point, index) => (
+        <circle
+          key={`${point.cx}-${point.cy}`}
+          cx={point.cx}
+          cy={point.cy}
+          r="5"
+          stroke={pinStatusTone(pinStatuses[index] ?? null, C)}
+          strokeWidth="3"
+          fill="none"
+        />
+      ))}
 {/* no parameter */}
 <circle cx={1035} cy={150} r="16" stroke={C.svgRing} strokeWidth="6" fill="none" />
       {/* Right side hole */}
@@ -1493,9 +1497,9 @@ function FrontDiagramSvg({ C, pinStatuses }: DiagramSvgProps) {
         x={930}
         y={205}
         label="12.2mm Diameter"
-        high="12.3"
-        low="12.1"
-        value="12.2"
+        high={svgSpecHigh(st1.params[4])}
+        low={svgSpecLow(st1.params[4])}
+        value={svgActualValue(st1.params[4], st1a[4])}
         C={C}
       />
 
@@ -1514,9 +1518,9 @@ function FrontDiagramSvg({ C, pinStatuses }: DiagramSvgProps) {
         x={250}
         y={35}
         label="Outer Diameter"
-        high="35.2"
-        low="34.8"
-        value="35"
+        high={svgSpecHigh(st1.params[0])}
+        low={svgSpecLow(st1.params[0])}
+        value={svgActualValue(st1.params[0], st1a[0])}
         C={C}
       />
     
@@ -1532,9 +1536,9 @@ function FrontDiagramSvg({ C, pinStatuses }: DiagramSvgProps) {
         x={735}
         y={205}
         label="Outer Diameter"
-        high="35.2"
-        low="34.8"
-        value="35"
+        high={svgSpecHigh(st1.params[1])}
+        low={svgSpecLow(st1.params[1])}
+        value={svgActualValue(st1.params[1], st1a[1])}
         C={C}
       />
 
@@ -1546,7 +1550,16 @@ function FrontDiagramSvg({ C, pinStatuses }: DiagramSvgProps) {
   );
 }
 
-function BottomDiagramSvg({ C, pinStatuses }: DiagramSvgProps) {
+function BottomDiagramSvg({ C, actuals, smallPinStatuses, specialStatuses }: DiagramSvgProps) {
+  const st5 = stations[4];
+  const st6 = stations[5];
+  const st5a = actuals[5] ?? {};
+  const st6a = actuals[6] ?? {};
+  const smallPinPoints = [
+    { cx: 225, cy: 173 },
+    { cx: 440, cy: 173 },
+    { cx: 966, cy: 173 },
+  ];
   return (
 
     <svg
@@ -1584,35 +1597,41 @@ function BottomDiagramSvg({ C, pinStatuses }: DiagramSvgProps) {
       </defs>
 
       {/* bottom 56degree hole  special 4mm/51 degree */}
-      <circle cx={725} cy={135} r="6" stroke={C.svgRing} strokeWidth="4" fill="none" />
+      <circle cx={725} cy={135} r="6" stroke={pinStatusTone(specialStatuses[0] ?? null, C)} strokeWidth="4" fill="none" />
       <line x1="725" y1="142" x2="725" y2="58" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
-      <SvgCard x={660} y={15} label="Hole Diameter" high="4.0" low="4.2" value="4.1" C={C} />
+      <SvgCard x={660} y={15} label="4mm / 51deg" high="" low="" value={pinStatusLabel(specialStatuses[0] ?? null)} C={C} />
 
       {/* ---------3nos 3 pin continously */} 
       {/* bottom1 hole */}
-      <circle cx={225} cy={173} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />
-      {/* bottom2 hole */}
-      <circle cx={440} cy={173} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />
-      {/* bottom3 hole */}
-      <circle cx={966} cy={173} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />
+      {smallPinPoints.map((point, index) => (
+        <circle
+          key={`${point.cx}-${point.cy}`}
+          cx={point.cx}
+          cy={point.cy}
+          r="5"
+          stroke={pinStatusTone(smallPinStatuses[index] ?? null, C)}
+          strokeWidth="3"
+          fill="none"
+        />
+      ))}
 
       {/* top  4.1*/}
       <circle cx={25} cy={60} r="6" stroke={C.svgRing} strokeWidth="4" fill="none" />
       <line x1="25" y1="55" x2="100" y2="5" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
 
-      <SvgCard x={100} y={-25} label="Hole Diameter" high="4.0" low="4.2" value="4.1" C={C} />
+      <SvgCard x={100} y={-25} label="Ball Hole" high={svgSpecHigh(st6.params[2])} low={svgSpecLow(st6.params[2])} value={svgActualValue(st6.params[2], st6a[2])} C={C} />
       {/* -------------- */}
       {/* top  6.2*/}
       <circle cx={52} cy={60} r="13" stroke={C.svgRing} strokeWidth="4" fill="none" />
       <line x1="70" y1="60" x2="250" y2="60" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
-      <SvgCard x={250} y={32} label="Reamer Diameter" high="6.2" low="6.1" value="6.2" C={C} />
+      <SvgCard x={250} y={32} label="Ball Hole" high={svgSpecHigh(st6.params[3])} low={svgSpecLow(st6.params[3])} value={svgActualValue(st6.params[3], st6a[3])} C={C} />
 
 
 
       {/* bottom 4.1*/}
       <circle cx={1036} cy={246} r="6" stroke={C.svgRing} strokeWidth="4" fill="none" />
       <line x1="870" y1="245" x2="1030" y2="245" stroke={C.svgLine} strokeWidth="1.5" markerEnd="url(#arrow)" />
-      <SvgCard x={750} y={215} label="Hole Diameter" high="4.0" low="4.2" value="4.1" C={C} />
+      <SvgCard x={750} y={215} label="Plug Hole" high={svgSpecHigh(st5.params[0])} low={svgSpecLow(st5.params[0])} value={svgActualValue(st5.params[0], st5a[0])} C={C} />
 
 
 
@@ -1621,7 +1640,7 @@ function BottomDiagramSvg({ C, pinStatuses }: DiagramSvgProps) {
       <circle cx={1062} cy={246} r="13" stroke={C.svgRing} strokeWidth="4" fill="none" />
       <line x1="1060" y1="265" x2="1060" y2="300" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
       <line x1="990" y1="300" x2="1060" y2="300" stroke={C.svgLine} strokeWidth="1.5" />
-      <SvgCard x={870} y={280} label="Reamer Hole" high="6.2" low="6.1" value="6.2" C={C} />
+      <SvgCard x={870} y={280} label="Plug Hole" high={svgSpecHigh(st5.params[1])} low={svgSpecLow(st5.params[1])} value={svgActualValue(st5.params[1], st5a[1])} C={C} />
 
 
 
@@ -1636,12 +1655,16 @@ function DiagramFullscreenModal({
   C,
   actuals,
   pinStatuses,
+  smallPinStatuses,
+  specialStatuses,
 }: {
   view: "front" | "bottom";
   onClose: () => void;
   C: T;
   actuals: Record<number, Record<number, number | null>>;
   pinStatuses: PlcPinStatus[];
+  smallPinStatuses: PlcPinStatus[];
+  specialStatuses: PlcPinStatus[];
 }) {
   const title = view === "front" ? "Front View" : "Bottom View";
 
@@ -1711,7 +1734,9 @@ function DiagramFullscreenModal({
           </button>
         </div>
         <div style={{ minHeight: 0, padding: 16, background: C.viewBg, overflow: "hidden" }}>
-          {view === "front" ? <FrontDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} /> : <BottomDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} />}
+          {view === "front"
+            ? <FrontDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} smallPinStatuses={smallPinStatuses} specialStatuses={specialStatuses} />
+            : <BottomDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} smallPinStatuses={smallPinStatuses} specialStatuses={specialStatuses} />}
         </div>
       </div>
     </div>
@@ -1934,8 +1959,6 @@ function Inspection1Dashboard() {
   const [station3, setStation3] = useState<Station3Data | null>(null);
   const [hoveredStation, setHoveredStation] = useState<number | null>(null);
   const [fullscreenView, setFullscreenView] = useState<"front" | "bottom" | null>(null);
-  const router = useRouter();
-
   const stationIds = stations.map(s => s.id);
   const nextId = (id: number) => {
     const idx = stationIds.indexOf(id);
@@ -1947,17 +1970,11 @@ function Inspection1Dashboard() {
 
     const refresh = async () => {
       try {
-        const response = await fetch(`/api/inspection/current?modelNo=${encodeURIComponent(CURRENT_MODEL_NO)}`, { cache: "no-store" });
+        const response = await fetch(`/api/inspection/current`, { cache: "no-store" });
         if (!response.ok) throw new Error("Inspection API request failed");
 
         const data: InspectionApiPayload = await response.json();
         if (!alive) return;
-
-        const activeRoute = MODEL_ROUTES[data.modelNo];
-        if (activeRoute && data.modelNo !== CURRENT_MODEL_NO) {
-          router.replace(activeRoute);
-          return;
-        }
 
         setInspectionData(data);
         setActuals(data.actuals);
@@ -1987,7 +2004,7 @@ function Inspection1Dashboard() {
       alive = false;
       clearInterval(iv);
     };
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     if (!fullscreenView) return;
@@ -2026,7 +2043,17 @@ function Inspection1Dashboard() {
       transition: "background 0.25s ease, color 0.25s ease",
     }}>
       <style>{GLOBAL}</style>
-      {fullscreenView && <DiagramFullscreenModal view={fullscreenView} onClose={() => setFullscreenView(null)} C={C} actuals={actuals} pinStatuses={pinStatuses} />}
+      {fullscreenView && (
+        <DiagramFullscreenModal
+          view={fullscreenView}
+          onClose={() => setFullscreenView(null)}
+          C={C}
+          actuals={actuals}
+          pinStatuses={pinStatuses}
+          smallPinStatuses={smallPinStatuses}
+          specialStatuses={specialStatuses}
+        />
+      )}
 
       {/* ════════════ LEFT PANEL (60%) ════════════ */}
       <div style={{
@@ -2070,7 +2097,7 @@ function Inspection1Dashboard() {
               </div>
               <div style={{ display: "flex", gap: sp.xs, minWidth: 0, whiteSpace: "nowrap" }}>
                 <span style={{ color: C.txtMid }}>Model No :</span>
-                <span id="modelNumber" style={{ color: C.accent }}>{inspectionData?.header.modelNumber ?? "--"}</span>
+                <span id="modelNumber" style={{ color: C.accent }}>{inspectionData?.modelNo ?? "--"}</span>
               </div>
             </div>
           </div>
@@ -2086,7 +2113,7 @@ function Inspection1Dashboard() {
           <div style={{ flex: 1, position: "relative", background: C.viewBg }}>
             <DiagramFullscreenButton label="Front View" onClick={() => setFullscreenView("front")} C={C} />
 
-            <FrontDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} />
+            <FrontDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} smallPinStatuses={smallPinStatuses} specialStatuses={specialStatuses} />
           </div>
         </div>
 
@@ -2100,7 +2127,7 @@ function Inspection1Dashboard() {
             <DiagramFullscreenButton label="Bottom View" onClick={() => setFullscreenView("bottom")} C={C} />
 
 
-            <BottomDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} />
+            <BottomDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} smallPinStatuses={smallPinStatuses} specialStatuses={specialStatuses} />
           </div>
         </div>
 

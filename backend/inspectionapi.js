@@ -8,11 +8,11 @@ const {
   wordsToDateTime,
   wordsToFloat,
   wordsToString,
-  wordsToUInt32,
+  wordsToUInt64,
 } = require("./plc-layout");
 
 const PORT = Number(process.env.INSPECTION_BACKEND_PORT || 4000);
-const MODEL_END = 10399;
+const MODEL_END = 10699;
 const READ_COUNT = MODEL_END - AREA_START + 1;
 const POLL_MS = Number(process.env.PLC_POLL_MS || process.env.MC_POLL_MS || 3000);
 const ERROR_DELAY_MS = Number(process.env.PLC_ERROR_DELAY_MS || 10000);
@@ -63,8 +63,8 @@ function decodeCommon(area) {
   return {
     shift: getWords(area, 10000, 1)[0],
     operator: wordsToString(getWords(area, 10001, 10)),
-    modelNo: wordsToUInt32(...getWords(area, 10011, 2)),
-    componentNo: wordsToUInt32(...getWords(area, 10013, 2)),
+    modelNo: getWords(area, 10011, 1)[0],
+    componentNo: wordsToUInt64(getWords(area, 10012, 4)),
     rtc: wordsToDateTime(getWords(area, 10020, 10)),
     total: getWords(area, 10030, 1)[0],
     ok: getWords(area, 10031, 1)[0],
@@ -173,8 +173,8 @@ function makePayload(area, config) {
       common: {
         shift: "D10000",
         operator: "D10001-D10010",
-        modelNo: "D10011-D10012",
-        componentNo: "D10013-D10014",
+        modelNo: "D10011",
+        componentNo: "D10012-D10015",
         rtc: "D10020-D10029",
         total: "D10030",
         ok: "D10031",
@@ -182,17 +182,17 @@ function makePayload(area, config) {
       },
       stations: {
         1: "D10100-D10149",
-        2: "D10150-D10199",
-        3: "D10200-D10249",
-        4: "D10250-D10299",
-        5: "D10300-D10349",
-        6: "D10350-D10399",
+        2: "D10200-D10299",
+        3: "D10300-D10399",
+        4: "D10400-D10499",
+        5: "D10500-D10599",
+        6: "D10600-D10699",
       },
       station3: {
-        marking2d: "D10200",
-        topEngraving: "D10201",
-        sideEngraving: "D10202",
-        qrVerifierValue: "D10210-D10219",
+        marking2d: "D10300",
+        topEngraving: "D10301",
+        sideEngraving: "D10302",
+        qrVerifierValue: "D10310-D10319",
       },
     },
     summary: {
@@ -211,7 +211,7 @@ function makePayload(area, config) {
       connected: true,
       updatedAt: new Date().toISOString(),
       readStartRegister: "D10000",
-      readEndRegister: "D10399",
+      readEndRegister: "D10699",
     },
     raw: {
       common,
@@ -257,7 +257,7 @@ function makeDisconnectedPayload(message) {
       message,
       updatedAt,
       readStartRegister: "D10000",
-      readEndRegister: "D10399",
+      readEndRegister: "D10699",
     },
   };
 }
@@ -313,6 +313,6 @@ const server = http.createServer((request, response) => {
 
 server.listen(PORT, () => {
   console.log(`Inspection API listening on http://localhost:${PORT}`);
-  console.log(`Reading universal PLC layout D10000-D10399 every ${POLL_MS}ms`);
+  console.log(`Reading universal PLC layout D10000-D10699 every ${POLL_MS}ms`);
   pollPlc().finally(() => schedulePoll(POLL_MS));
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import Header from './components/Header';
+import Header from '../inspection1/components/Header';
 import { ThemeProvider, useTheme } from './components/ThemeContext';
 
 function InnerLayout({ children }: { children: React.ReactNode }) {

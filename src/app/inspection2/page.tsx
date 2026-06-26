@@ -5,14 +5,6 @@ import React from "react";
 import type { InspectionApiPayload, PlcPinStatus } from '../../lib/inspectionDataService';
 import { Activity, ArrowRight, CheckCircle2, Gauge, Maximize2, QrCode, ScanLine, X, XCircle } from "lucide-react";
 import { useTheme } from "./components/ThemeContext";
-import { useRouter } from "next/navigation";
-
-const CURRENT_MODEL_NO = "6630867";
-const MODEL_ROUTES: Record<string, string> = {
-  "6630865": "/inspection1",
-  "6630867": "/inspection2",
-  "6630862": "/inspection3",
-};
 /* ═══════════════════════════════════════════════════════════
   DATA
 ═══════════════════════════════════════════════════════════ */
@@ -23,9 +15,9 @@ const stations = [
       { name: "Shaft OD (Left)", req: 35, tol: 0.025, unit: "mm" },
       { name: "Shaft OD (Right)", req: 35, tol: 0.025, unit: "mm" },
       { name: "Overall Length", req: 466, tol: 0.1, unit: "mm" },
-      { name: "Dowel CF (Left)", req: 26.9, tol: 0.1, unit: "mm" },
-      { name: "Dowel CF (Right)", req: 26.9, tol: 0.1, unit: "mm" },
-      { name: "12.2mm Diameter", req: 12.2, tol: 0.025, unit: "mm" }
+      { name: "Dowel Length", req: 459, tol: 0.1, unit: "mm" },
+      { name: "12.2mm Diameter", req: 12.2, tol: 0.025, unit: "mm" },
+      { name: "Gauge Dowel to Dowel", req: 445.1345, tol: 0.0005, unit: "mm" }
     ],
   },
   {
@@ -658,17 +650,17 @@ function Station01Panel({
   const shaftL = actuals[0] ?? null;
   const shaftR = actuals[1] ?? null;
   const oaLen = actuals[2] ?? null;
-  const dowelL = actuals[3] ?? null;
-  const dowelR = actuals[4] ?? null;
-  const dia122 = actuals[5] ?? null;
+  const dowelLength = actuals[3] ?? null;
+  const apg122 = actuals[4] ?? null;
+  const gaugeDowelToDowel = actuals[5] ?? null;
   const results = [
     isPass(p[0].req, p[0].tol, shaftL),
     isPass(p[1].req, p[1].tol, shaftR),
     isPass(p[2].req, p[2].tol, oaLen),
-    isPass(p[3].req, p[3].tol, dowelL),
-    isPass(p[5].req, p[5].tol, dia122),
+    isPass(p[3].req, p[3].tol, dowelLength),
+    isPass(p[4].req, p[4].tol, apg122),
     true,
-    isPass(p[4].req, p[4].tol, dowelR),
+    isPass(p[5].req, p[5].tol, gaugeDowelToDowel),
   ];
   const okCount = results.filter(Boolean).length;
   const ngCount = results.length - okCount;
@@ -793,8 +785,8 @@ function Station01Panel({
         />
 
         <ValCell
-          value={dowelL !== null ? dowelL.toFixed(3) : "—"}
-          pass={isPass(p[3].req, p[3].tol, dowelL)}
+          value={dowelLength !== null ? dowelLength.toFixed(3) : "—"}
+          pass={isPass(p[3].req, p[3].tol, dowelLength)}
             unit={p[3].unit}
           label="Calc"
           rangeLabel="458.900-459.100"
@@ -803,11 +795,11 @@ function Station01Panel({
         />
 
         <ValCell
-          value={dia122 !== null ? dia122.toFixed(3) : "—"}
-          pass={isPass(p[5].req, p[5].tol, dia122)}
-            unit={p[5].unit}
+          value={apg122 !== null ? apg122.toFixed(3) : "—"}
+          pass={isPass(p[4].req, p[4].tol, apg122)}
+            unit={p[4].unit}
           label="APG"
-          rangeLabel="12.2-12.4"
+          rangeLabel="12.175-12.225"
           fontSize={station01ValueFont}
           C={C}
         />
@@ -815,9 +807,9 @@ function Station01Panel({
         <ValCell value="OK" pass={true} label="Vision" fontSize={station01ValueFont} C={C} />
 
         <ValCell
-          value={dowelR !== null ? dowelR.toFixed(3) : "—"}
-          pass={isPass(p[4].req, p[4].tol, dowelR)}
-            unit={p[4].unit}
+          value={gaugeDowelToDowel !== null ? gaugeDowelToDowel.toFixed(3) : "—"}
+          pass={isPass(p[5].req, p[5].tol, gaugeDowelToDowel)}
+            unit={p[5].unit}
           label="Guage"
           rangeLabel="445.134-445.135"
           fontSize={station01ValueFont}
@@ -1348,9 +1340,12 @@ type DiagramSvgProps = {
 
 function FrontDiagramSvg({ C, actuals, pinStatuses }: DiagramSvgProps) {
   const st1 = stations[0];
-  const st6 = stations[5];
   const st1a = actuals[1] ?? {};
-  const st6a = actuals[6] ?? {};
+  const frontPinPoints = [
+    { cx: 116, cy: 150 }, { cx: 152, cy: 150 }, { cx: 223, cy: 150 }, { cx: 255, cy: 150 }, { cx: 287, cy: 150 },
+    { cx: 455, cy: 151 }, { cx: 487, cy: 151 }, { cx: 520, cy: 151 }, { cx: 595, cy: 151 }, { cx: 630, cy: 151 },
+    { cx: 840, cy: 151 }, { cx: 870, cy: 151 }, { cx: 945, cy: 151 }, { cx: 976, cy: 151 }, { cx: 1010, cy: 151 },
+  ];
   return (
     <svg
       viewBox="0 0 1100 300"
@@ -1414,9 +1409,17 @@ function FrontDiagramSvg({ C, actuals, pinStatuses }: DiagramSvgProps) {
       />
 
       {/* 15pins continuosly 15pin1 like */}
-      {[116, 152, 223, 255, 287].map(cx => <circle key={cx} cx={cx} cy={150} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />)}
-      {[455, 487, 520, 595, 630].map(cx => <circle key={cx} cx={cx} cy={151} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />)}
-      {[840, 870, 945, 976, 1010].map(cx => <circle key={cx} cx={cx} cy={151} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />)}
+      {frontPinPoints.map((point, index) => (
+        <circle
+          key={`${point.cx}-${point.cy}`}
+          cx={point.cx}
+          cy={point.cy}
+          r="5"
+          stroke={pinStatusTone(pinStatuses[index] ?? null, C)}
+          strokeWidth="3"
+          fill="none"
+        />
+      ))}
 
 
       {/* Right side hole  no parameter */}
@@ -1504,6 +1507,11 @@ function BottomDiagramSvg({ C, actuals, smallPinStatuses, specialStatuses }: Dia
   const st6 = stations[5];
   const st5a = actuals[5] ?? {};
   const st6a = actuals[6] ?? {};
+  const smallPinPoints = [
+    { cx: 130, cy: 192 },
+    { cx: 583, cy: 192 },
+    { cx: 825, cy: 192 },
+  ];
   return (
         <svg
               viewBox="0 0 1100 300"
@@ -1540,12 +1548,20 @@ function BottomDiagramSvg({ C, actuals, smallPinStatuses, specialStatuses }: Dia
               </defs>
 
               {/* 4mm 51 degree presence  */}
-              <circle cx={757} cy={146} r="6" stroke={C.svgRing} strokeWidth="4" fill="none" />
+              <circle cx={757} cy={146} r="6" stroke={pinStatusTone(specialStatuses[0] ?? null, C)} strokeWidth="4" fill="none" />
 
 {/* 3pin1 3pin2 3pin3 contunously  */}
-              <circle cx={130} cy={192} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />
-              <circle cx={583} cy={192} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />
-              <circle cx={825} cy={192} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />
+              {smallPinPoints.map((point, index) => (
+                <circle
+                  key={`${point.cx}-${point.cy}`}
+                  cx={point.cx}
+                  cy={point.cy}
+                  r="5"
+                  stroke={pinStatusTone(smallPinStatuses[index] ?? null, C)}
+                  strokeWidth="3"
+                  fill="none"
+                />
+              ))}
 
               {/* left   4.2 mm */}
               <g id="ballHoleLeftGroup" data-station="ST-06" data-table-id="ballHoleLeft">
@@ -1598,11 +1614,17 @@ function DiagramFullscreenModal({
   onClose,
   C,
   actuals,
+  pinStatuses,
+  smallPinStatuses,
+  specialStatuses,
 }: {
   view: "front" | "bottom";
   onClose: () => void;
   C: T;
   actuals: Record<number, Record<number, number | null>>;
+  pinStatuses: PlcPinStatus[];
+  smallPinStatuses: PlcPinStatus[];
+  specialStatuses: PlcPinStatus[];
 }) {
   const title = view === "front" ? "Front View" : "Bottom View";
 
@@ -1672,7 +1694,9 @@ function DiagramFullscreenModal({
           </button>
         </div>
         <div style={{ minHeight: 0, padding: 16, background: C.viewBg, overflow: "hidden" }}>
-          {view === "front" ? <FrontDiagramSvg C={C} actuals={actuals} /> : <BottomDiagramSvg C={C} actuals={actuals} />}
+          {view === "front"
+            ? <FrontDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} smallPinStatuses={smallPinStatuses} specialStatuses={specialStatuses} />
+            : <BottomDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} smallPinStatuses={smallPinStatuses} specialStatuses={specialStatuses} />}
         </div>
       </div>
     </div>
@@ -1887,13 +1911,12 @@ export default function Dashboard() {
   const [smallPinStatuses, setSmallPinStatuses] = useState<PlcPinStatus[]>(() => empty3PinStatuses());
   const [specialStatuses, setSpecialStatuses] = useState<PlcPinStatus[]>(() => empty3PinStatuses());
   const [station3, setStation3] = useState<Station3Data | null>(null);
+  const [inspectionData, setInspectionData] = useState<InspectionApiPayload | null>(null);
   const [total, setTotal] = useState(0);
   const [okCount, setOkCount] = useState(0);
   const [ngCount, setNgCount] = useState(0);
   const [hoveredStation, setHoveredStation] = useState<number | null>(null);
   const [fullscreenView, setFullscreenView] = useState<"front" | "bottom" | null>(null);
-  const router = useRouter();
-
   const stationIds = stations.map(s => s.id);
   const nextId = (id: number) => {
     const idx = stationIds.indexOf(id);
@@ -1905,18 +1928,13 @@ export default function Dashboard() {
 
     const refresh = async () => {
       try {
-        const response = await fetch(`/api/inspection/current?modelNo=${encodeURIComponent(CURRENT_MODEL_NO)}`, { cache: "no-store" });
+        const response = await fetch(`/api/inspection/current`, { cache: "no-store" });
         if (!response.ok) throw new Error("Inspection API request failed");
 
         const data: InspectionApiPayload = await response.json();
         if (!alive) return;
 
-        const activeRoute = MODEL_ROUTES[data.modelNo];
-        if (activeRoute && data.modelNo !== CURRENT_MODEL_NO) {
-          router.replace(activeRoute);
-          return;
-        }
-
+        setInspectionData(data);
         setActuals(data.actuals);
         const communicating = data.source.connected;
         setPinStatuses(communicating ? data.pinStatuses?.holes15 ?? empty15PinStatuses() : empty15PinStatuses());
@@ -1928,6 +1946,7 @@ export default function Dashboard() {
         setNgCount(data.summary.ng);
       } catch (error) {
         console.error("Inspection data refresh failed:", error);
+        setInspectionData(null);
         setPinStatuses(empty15PinStatuses());
         setSmallPinStatuses(empty3PinStatuses());
         setSpecialStatuses(empty3PinStatuses());
@@ -1936,12 +1955,12 @@ export default function Dashboard() {
     };
 
     refresh();
-    const iv = setInterval(refresh, 1800);
+    const iv = setInterval(refresh, 5000);
     return () => {
       alive = false;
       clearInterval(iv);
     };
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     if (!fullscreenView) return;
@@ -1977,7 +1996,17 @@ export default function Dashboard() {
       transition: "background 0.25s ease, color 0.25s ease",
     }}>
       <style>{GLOBAL}</style>
-      {fullscreenView && <DiagramFullscreenModal view={fullscreenView} onClose={() => setFullscreenView(null)} C={C} actuals={actuals} />}
+      {fullscreenView && (
+        <DiagramFullscreenModal
+          view={fullscreenView}
+          onClose={() => setFullscreenView(null)}
+          C={C}
+          actuals={actuals}
+          pinStatuses={pinStatuses}
+          smallPinStatuses={smallPinStatuses}
+          specialStatuses={specialStatuses}
+        />
+      )}
 
       {/* ════════════ LEFT PANEL (60%) ════════════ */}
       <div style={{
@@ -1991,6 +2020,40 @@ export default function Dashboard() {
         minHeight: 0,
         minWidth: 0,
       }}>
+        {/* Header */}
+        <div style={{
+          height: "clamp(36px,4.6vh,52px)",
+          display: "flex", alignItems: "center",
+          padding: `0 ${sp.md}`, gap: sp.sm,
+          borderBottom: `1px solid ${C.brd}`,
+          background: C.hdr, flexShrink: 0,
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                ...MONO,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                fontSize: "clamp(9px,0.58vw,12px)",
+                fontWeight: 800,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+              }}
+            >
+              <div style={{ color: C.txtMid }}>Component Assembly</div>
+              <div style={{ display: "flex", gap: sp.xs, minWidth: 0, whiteSpace: "nowrap" }}>
+                <span style={{ color: C.txtMid }}>Component No :</span>
+                <span id="componentNumber" style={{ color: C.accent }}>{inspectionData?.header.componentNo ?? "--"}</span>
+              </div>
+              <div style={{ display: "flex", gap: sp.xs, minWidth: 0, whiteSpace: "nowrap" }}>
+                <span style={{ color: C.txtMid }}>Model No :</span>
+                <span id="modelNumber" style={{ color: C.accent }}>{inspectionData?.modelNo ?? "--"}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* FRONT VIEW */}
         <div style={{ flex: "1 1 0", display: "flex", flexDirection: "column", borderBottom: `1px solid ${C.brd}`, minHeight: 0 }}>
           <div style={{ padding: `${sp.xs} ${sp.md}`, borderBottom: `1px solid ${C.brd}`, background: C.hdr, flexShrink: 0, display: "flex", alignItems: "center", gap: sp.sm }}>
@@ -2000,7 +2063,7 @@ export default function Dashboard() {
           <div style={{ flex: 1, position: "relative", background: C.viewBg }}>
             <DiagramFullscreenButton label="Front View" onClick={() => setFullscreenView("front")} C={C} />
 
-            <FrontDiagramSvg C={C} actuals={actuals} />
+            <FrontDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} smallPinStatuses={smallPinStatuses} specialStatuses={specialStatuses} />
           </div>
         </div>
 
@@ -2013,7 +2076,7 @@ export default function Dashboard() {
           <div style={{ flex: 1, position: "relative", background: C.viewBg, padding: "0 clamp(4px,0.75vw,14px)", minWidth: 0, overflow: "hidden" }}>
             <DiagramFullscreenButton label="Bottom View" onClick={() => setFullscreenView("bottom")} C={C} />
 
-            <BottomDiagramSvg C={C} actuals={actuals} />
+            <BottomDiagramSvg C={C} actuals={actuals} pinStatuses={pinStatuses} smallPinStatuses={smallPinStatuses} specialStatuses={specialStatuses} />
           </div>
         </div>
 

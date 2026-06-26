@@ -10,8 +10,29 @@ export type InspectionHeader = {
   modelNumber: string;
 };
 
+export type InspectionRtc = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  millisecond?: number;
+  dayOfWeek?: number;
+  epochSeconds?: number | string;
+};
+
+export type InspectionCommon = {
+  shift: number | string;
+  operator: string;
+  modelNo: InspectionModelNo;
+  componentNo: string;
+  rtc?: InspectionRtc | null;
+};
+
 export type InspectionApiPayload = {
   header: InspectionHeader;
+  common?: InspectionCommon;
   componentNo: string;
   modelNo: InspectionModelNo;
   modelNumber: string;
@@ -222,6 +243,20 @@ function makeMockInspectionData(modelNo: InspectionModelNo): InspectionApiPayloa
       componentNo: `Co-${modelNo}`,
       modelNumber: `Shaft-${modelNo}`,
     },
+    common: {
+      shift: 1,
+      operator: "MOCK-OP",
+      modelNo,
+      componentNo: `Co-${modelNo}`,
+      rtc: {
+        year: new Date().getFullYear(),
+        month: new Date().getMonth() + 1,
+        day: new Date().getDate(),
+        hour: new Date().getHours(),
+        minute: new Date().getMinutes(),
+        second: new Date().getSeconds(),
+      },
+    },
     componentNo: `Co-${modelNo}`,
     modelNo,
     modelNumber: `Shaft-${modelNo}`,
@@ -287,6 +322,48 @@ function normalizeSummary(payload: unknown, statuses: PlcPinStatus[]) {
   return summarizePins(statuses);
 }
 
+function normalizeRtc(value: unknown): InspectionRtc | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const year = numberValue(record.year);
+  const month = numberValue(record.month);
+  const day = numberValue(record.day);
+  const hour = numberValue(record.hour);
+  const minute = numberValue(record.minute);
+  const second = numberValue(record.second);
+  if (year === null || month === null || day === null || hour === null || minute === null || second === null) return null;
+
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+    millisecond: numberValue(record.millisecond) ?? undefined,
+    dayOfWeek: numberValue(record.dayOfWeek) ?? undefined,
+    epochSeconds: textValue(record.epochSeconds, ""),
+  };
+}
+
+function normalizeCommon(payload: unknown, header: InspectionHeader): InspectionCommon {
+  const root = asPayloadRecord(payload);
+  const raw = root?.raw && typeof root.raw === "object" ? root.raw as Record<string, unknown> : null;
+  const common = raw?.common && typeof raw.common === "object"
+    ? raw.common as Record<string, unknown>
+    : root?.common && typeof root.common === "object"
+      ? root.common as Record<string, unknown>
+      : {};
+
+  return {
+    shift: numberValue(common.shift) ?? "-",
+    operator: textValue(common.operator, header.operatorId),
+    modelNo: textValue(common.modelNo ?? root?.modelNo, "-"),
+    componentNo: textValue(common.componentNo ?? root?.componentNo, header.componentNo),
+    rtc: normalizeRtc(common.rtc),
+  };
+}
+
 async function readFromBackend() {
   const backendUrl = normalizeBackendUrl();
 
@@ -297,11 +374,13 @@ async function readFromBackend() {
     const payload = await response.json();
     const plcConnected = backendPlcConnected(payload);
     const statuses = plcConnected ? normalizePinStatuses(payload) : EMPTY_PIN_STATUSES;
+    const header = normalizeHeader(payload);
     return {
       backendUrl,
       connected: plcConnected,
       payload,
-      header: normalizeHeader(payload),
+      header,
+      common: normalizeCommon(payload, header),
       statuses,
       summary: plcConnected ? normalizeSummary(payload, statuses) : { total: 0, ok: 0, ng: 0 },
       updatedAt: normalizeBackendUpdatedAt(payload),
@@ -319,6 +398,7 @@ async function readFromBackend() {
       connected: false,
       payload: null,
       header: EMPTY_HEADER,
+      common: normalizeCommon(null, EMPTY_HEADER),
       statuses: EMPTY_PIN_STATUSES,
       summary: { total: 0, ok: 0, ng: 0 },
       updatedAt: new Date().toISOString(),
@@ -414,6 +494,7 @@ export async function getInspectionData(modelNo?: string | null): Promise<Inspec
 
   return {
     header: backend.header,
+    common: backend.common,
     componentNo: backend.header.componentNo,
     modelNo: backendModelNo,
     modelNumber: backendModelNumber,
