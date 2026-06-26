@@ -5,8 +5,14 @@ import React from "react";
 import type { InspectionApiPayload } from '../../lib/inspectionDataService';
 import { Activity, ArrowRight, CheckCircle2, Gauge, Maximize2, QrCode, ScanLine, X, XCircle } from "lucide-react";
 import { useTheme } from "./components/ThemeContext";
+import { useRouter } from "next/navigation";
 
 const CURRENT_MODEL_NO = "6630862";
+const MODEL_ROUTES: Record<string, string> = {
+  "6630865": "/inspection1",
+  "6630867": "/inspection2",
+  "6630862": "/inspection3",
+};
 /* ═══════════════════════════════════════════════════════════
   DATA
 ═══════════════════════════════════════════════════════════ */
@@ -1952,6 +1958,7 @@ export default function Dashboard() {
   const [ngCount, setNgCount] = useState(0);
   const [hoveredStation, setHoveredStation] = useState<number | null>(null);
   const [fullscreenView, setFullscreenView] = useState<"front" | "bottom" | null>(null);
+  const router = useRouter();
 
   const stationIds = stations.map(s => s.id);
   const nextId = (id: number) => {
@@ -1970,6 +1977,12 @@ export default function Dashboard() {
         const data: InspectionApiPayload = await response.json();
         if (!alive) return;
 
+        const activeRoute = MODEL_ROUTES[data.modelNo];
+        if (activeRoute && data.modelNo !== CURRENT_MODEL_NO) {
+          router.replace(activeRoute);
+          return;
+        }
+
         setActuals(data.actuals);
         setTotal(data.summary.total);
         setOkCount(data.summary.ok);
@@ -1986,7 +1999,7 @@ export default function Dashboard() {
       alive = false;
       clearInterval(iv);
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!fullscreenView) return;

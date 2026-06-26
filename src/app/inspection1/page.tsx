@@ -5,8 +5,14 @@ import React from "react";
 import type { InspectionApiPayload, PlcPinStatus } from '../../lib/inspectionDataService';
 import { Activity, ArrowRight, CheckCircle2, Gauge, Maximize2, QrCode, ScanLine, X, XCircle } from "lucide-react";
 import { useTheme } from "./components/ThemeContext";
+import { useRouter } from "next/navigation";
 // Current model for this PLC-backed screen.
 const CURRENT_MODEL_NO = "6630865";
+const MODEL_ROUTES: Record<string, string> = {
+  "6630865": "/inspection1",
+  "6630867": "/inspection2",
+  "6630862": "/inspection3",
+};
 /* ═══════════════════════════════════════════════════════════
   DATA
 ═══════════════════════════════════════════════════════════ */
@@ -73,6 +79,7 @@ function isPass(req: number | null, tol: number | null, val: number | null): boo
   return val >= req - tol && val <= req + tol;
 }
 const empty15PinStatuses = (): PlcPinStatus[] => Array.from({ length: 15 }, () => null);
+const empty3PinStatuses = (): PlcPinStatus[] => Array.from({ length: 3 }, () => null);
 const pinStatusLabel = (status: PlcPinStatus) => status === 4 ? "OK" : status === 5 ? "NG" : status === 2 ? "LOAD" : "-";
 const pinStatusTone = (status: PlcPinStatus, C: T) => status === 4 ? C.ok : status === 5 ? C.ng : status === 2 ? "#f97316" : C.txtMid;
 const pinStatusSoftTone = (status: PlcPinStatus, C: T) => status === 4 ? C.okSoft : status === 5 ? C.ngSoft : status === 2 ? "rgba(249,115,22,0.14)" : C.cellNeutral;
@@ -908,7 +915,17 @@ function Station01Panel({
 /* ═══════════════════════════════════════════════════════════
   STATION 02 — pin matrix layout
 ═══════════════════════════════════════════════════════════ */
-function Station02Panel({ pinStatuses, C }: { pinStatuses: PlcPinStatus[]; C: T }) {
+function Station02Panel({
+  pinStatuses,
+  smallPinStatuses,
+  specialStatuses,
+  C,
+}: {
+  pinStatuses: PlcPinStatus[];
+  smallPinStatuses: PlcPinStatus[];
+  specialStatuses: PlcPinStatus[];
+  C: T;
+}) {
   type PinCell = { id: string; n: number; status: PlcPinStatus; label: string; register: string };
   const pins15: PinCell[] = Array.from({ length: 15 }, (_, index) => {
     const pinNo = index + 1;
@@ -921,9 +938,22 @@ function Station02Panel({ pinStatuses, C }: { pinStatuses: PlcPinStatus[]; C: T 
       register: `D${register}`,
     };
   });
-  const okCount = pins15.filter(cell => cell.status === 4).length;
-  const ngCount = pins15.filter(cell => cell.status === 5).length;
-  const loadingCount = pins15.filter(cell => cell.status === 2).length;
+  const pins3: PinCell[] = Array.from({ length: 3 }, (_, index) => ({
+    id: `3pin${index + 1}`,
+    n: index + 16,
+    status: smallPinStatuses[index] ?? null,
+    label: String(index + 1).padStart(2, "0"),
+    register: `M${index + 1}`,
+  }));
+  const specialPins: PinCell[] = [
+    { id: "fourMm51", n: 19, status: specialStatuses[0] ?? null, label: "4mm / 51deg", register: "SP1" },
+    { id: "fourHolePositions", n: 20, status: specialStatuses[1] ?? null, label: "4 Hole Positions", register: "SP2" },
+    { id: "slot12213", n: 21, status: specialStatuses[2] ?? null, label: "12.2-13 Slot", register: "SP3" },
+  ];
+  const allPins = [...pins15, ...pins3, ...specialPins];
+  const okCount = allPins.filter(cell => cell.status === 4).length;
+  const ngCount = allPins.filter(cell => cell.status === 5).length;
+  const loadingCount = allPins.filter(cell => cell.status === 2).length;
 
   const Cell = ({ cell }: { cell: PinCell }) => {
     const tone = pinStatusTone(cell.status, C);
@@ -1021,24 +1051,8 @@ function Station02Panel({ pinStatuses, C }: { pinStatuses: PlcPinStatus[]; C: T 
 
       <div
         style={{
-          ...MONO,
-          fontSize: fs.sm,
-          fontWeight: 800,
-          textAlign: "center",
-          padding: sp.xs,
-          color: C.txt,
-          background: C.panel,
-          borderBottom: `1.5px solid ${C.isDark ? C.brd : "#dfe7f0"}`,
-        }}
-      >
-        15 Nos of 3mm Hole
-      </div>
-
-      <div
-        style={{
           display: "grid",
-          gridTemplateColumns: "repeat(5, 1fr)",
-          gridTemplateRows: "repeat(3, minmax(0, 1fr))",
+          gridTemplateColumns: "minmax(0, 2.2fr) minmax(0, 0.9fr) minmax(0, 1.2fr)",
           gap: sp.xs,
           padding: sp.xs,
           flex: 1,
@@ -1046,19 +1060,58 @@ function Station02Panel({ pinStatuses, C }: { pinStatuses: PlcPinStatus[]; C: T 
           minHeight: 0,
         }}
       >
-        {pins15.map((cell) => <Cell key={cell.id} cell={cell} />)}
+        <div style={{ display: "grid", gridTemplateRows: "auto minmax(0,1fr)", gap: sp.xs, minHeight: 0 }}>
+          <Station02GroupTitle C={C}>15 Nos of 3mm Hole</Station02GroupTitle>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gridTemplateRows: "repeat(3, minmax(0, 1fr))", gap: sp.xs, minHeight: 0 }}>
+            {pins15.map((cell) => <Cell key={cell.id} cell={cell} />)}
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateRows: "auto repeat(3, minmax(0,1fr))", gap: sp.xs, minHeight: 0 }}>
+          <Station02GroupTitle C={C}>3 Nos of 3mm Hole</Station02GroupTitle>
+          {pins3.map((cell) => <Cell key={cell.id} cell={cell} />)}
+        </div>
+        <div style={{ display: "grid", gridTemplateRows: "auto repeat(3, minmax(0,1fr))", gap: sp.xs, minHeight: 0 }}>
+          <Station02GroupTitle C={C}>Special</Station02GroupTitle>
+          {specialPins.map((cell) => <Cell key={cell.id} cell={cell} />)}
+        </div>
       </div>
     </div>
   );
 }
+function Station02GroupTitle({ children, C }: { children: React.ReactNode; C: T }) {
+  return (
+    <div
+      style={{
+        ...MONO,
+        fontSize: fs.xs,
+        fontWeight: 900,
+        textAlign: "center",
+        padding: sp.xs,
+        color: C.txt,
+        background: C.hdr,
+        border: `1.5px solid ${C.isDark ? C.brd : "#dfe7f0"}`,
+        borderRadius: 3,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 type Station03Cell = { id: string; name: string; pass: boolean | null; grade?: string | null };
+type Station3Data = NonNullable<InspectionApiPayload["station3"]>;
 
-function Station03Panel({ C }: { C: T }) {
+function plcStatusToPass(status: PlcPinStatus): boolean | null {
+  if (status === 4) return true;
+  if (status === 5) return false;
+  return null;
+}
+
+function Station03Panel({ station3, C }: { station3: Station3Data | null; C: T }) {
   const cols: Station03Cell[] = [
-    { id: "laser2dMarking", name: "2D Marking", pass: null },
-    { id: "laserTopEngraving", name: "Top Engraving", pass: null },
-    { id: "laserSideEngraving", name: "Side Engraving", pass: null },
-    { id: "laserVerifier", name: "Verifier", pass: null, grade: null },
+    { id: "laser2dMarking", name: "2D Marking", pass: plcStatusToPass(station3?.marking2d ?? null) },
+    { id: "laserTopEngraving", name: "Top Engraving", pass: plcStatusToPass(station3?.topEngraving ?? null) },
+    { id: "laserSideEngraving", name: "Side Engraving", pass: plcStatusToPass(station3?.sideEngraving ?? null) },
+    { id: "laserVerifier", name: "Verifier", pass: station3?.qrVerifierValue ? true : null, grade: station3?.qrGrade ?? station3?.qrVerifierValue ?? null },
   ];
 
   return (
@@ -1334,34 +1387,249 @@ const frontPinPoints = [
   { cx: 770, cy: 147 }, { cx: 802, cy: 147 }, { cx: 835, cy: 147 }, { cx: 915, cy: 147 }, { cx: 960, cy: 147 },
 ];
 
+
 function FrontDiagramSvg({ C, pinStatuses }: DiagramSvgProps) {
   return (
-    <svg viewBox="0 0 1100 300" preserveAspectRatio="xMidYMid meet" style={{ width: "100%", height: "100%", display: "block" }}>
-      <image href="/images/6630865inspectionfront.png" x="0" y="0" width="1100" height="300" preserveAspectRatio="xMidYMid meet" />
+    <svg
+      viewBox="0 0 1100 300"
+      preserveAspectRatio="xMidYMid meet"
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "block",
+      }}
+    >
+      <defs>
+        <marker
+          id="arrow"
+          markerWidth="6"
+          markerHeight="6"
+          refX="5"
+          refY="3"
+          orient="auto-start-reverse"
+          markerUnits="strokeWidth"
+        >
+          <path
+            d="M0,0 L6,3 L0,6 Z"
+            fill={C.svgLine}
+          />
+        </marker>
+      </defs>
+      {/* 🔥 IMAGE INSIDE SVG */}
+      <image
+        href="/images/shaft1front.png"
+        x="0"
+        y="0"
+        width="1100"
+        height="300"
+        preserveAspectRatio="xMidYMid meet"
+      />
 
-      <g id="station2Pins15" data-station="ST-02" data-source="D102-D130">
-        {frontPinPoints.map((point, i) => {
-          const pinNo = i + 1;
-          const pinId = `15pin${pinNo}`;
-          const status = pinStatuses[i] ?? null;
-          const pinColor = pinStatusTone(status, C);
-          return (
-            <g key={pinId} id={pinId} data-station="ST-02" data-register={`D${102 + i * 2}`} data-status={status ?? ""}>
-              <circle id={`${pinId}Circle`} cx={point.cx} cy={point.cy} r="5" stroke={pinColor} strokeWidth="3" fill="none" />
-            </g>
-          );
-        })}
-      </g>
+      {/* Overall Length bottom  */}
+
+      <line x1="35" y1="280" x2="1065" y2="280" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" markerEnd="url(#arrow)" />
+      <line x1="30" y1="290" x2="30" y2="190" stroke={C.svgLine} strokeWidth="1.5" />
+      <line x1="1070" y1="290" x2="1070" y2="190" stroke={C.svgLine} strokeWidth="1.5" />
+
+      <SvgCard
+        x={480}
+        y={250}
+        label="Overall Length"
+        high="472"
+        low="470"
+        value="471"
+        C={C}
+      />
+      {/* ABove Dowel Lenth bottom  */}
+      <line x1="90" y1="10" x2="995" y2="10" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" markerEnd="url(#arrow)" />
+      <line x1="85" y1="5" x2="85" y2="100" stroke={C.svgLine} strokeWidth="1.5" />
+      <line x1="1000" y1="5" x2="1000" y2="100" stroke={C.svgLine} strokeWidth="1.5" />
+         <SvgCard
+        x={480}
+        y={-10}
+        label="Dowel Length"
+        high="450"
+        low="448"
+        value="448"
+        C={C}
+      />
+
+
+      {/* 15pins 15pin1 continuously */}
+      {[82, 112, 142, 209, 245].map(cx => <circle key={cx} cx={cx} cy={145} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />)}
+      {[448, 485, 555, 585, 615].map(cx => <circle key={cx} cx={cx} cy={146} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />)}
+      {[770, 802, 835, 915, 960].map(cx => <circle key={cx} cx={cx} cy={147} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />)}
+{/* no parameter */}
+<circle cx={1035} cy={150} r="16" stroke={C.svgRing} strokeWidth="6" fill="none" />
+      {/* Right side hole */}
+      <circle cx={1010} cy={165} r="5" stroke={C.svgRing} strokeWidth="4" fill="none" />
+      
+       {/* 4.98 mm  */}
+      <line x1="75" y1="170" x2="75" y2="220" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
+
+     
+      {/* left side 4.98 .. */}
+      <SvgCard
+        x={60}
+        y={215}
+        label="4.98mm Diameter"
+        high="5.0"
+        low="4.9"
+        value="4.98"
+        C={C}
+      />
+
+      {/* Left  side hole  no parameter */}
+      <circle cx={70} cy={165} r="4" stroke={C.svgRing} strokeWidth="3" fill="none" />
+      {/* 12.2 mm fron apg 12mm dia
+      */}
+      <circle cx={50} cy={145} r="16" stroke={C.svgRing} strokeWidth="6" fill="none" />
+       {/* 12.2 mm  */}
+      <line x1="1035" y1="170" x2="1035" y2="210" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
+
+      {/* right side 12 mm */}
+
+      <SvgCard
+        x={930}
+        y={205}
+        label="12.2mm Diameter"
+        high="12.3"
+        low="12.1"
+        value="12.2"
+        C={C}
+      />
+
+
+
+
+      {/* left side 35 mm diameter */}
+      <line x1="220" y1="60" x2="260" y2="60" stroke={C.svgLine} strokeWidth="1.5" />
+      <line x1="220" y1="100" x2="220" y2="60" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
+      <line x1="180" y1="105" x2="260" y2="105" stroke={C.svgLine} strokeWidth="1.5" />
+      <line x1="180" y1="190" x2="260" y2="190" stroke={C.svgLine} strokeWidth="1.5" />
+      <line x1="220" y1="230" x2="220" y2="195" stroke={C.svgLine} strokeWidth="1.5" markerEnd="url(#arrow)" />
+
+  {/* left side 35 mm */}
+      <SvgCard
+        x={250}
+        y={35}
+        label="Outer Diameter"
+        high="35.2"
+        low="34.8"
+        value="35"
+        C={C}
+      />
+    
+      {/* Right side 35 diameter */}
+
+      <line x1="900" y1="225" x2="860" y2="225" stroke={C.svgLine} strokeWidth="1.5" />
+      <line x1="900" y1="100" x2="900" y2="60" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
+      <line x1="860" y1="105" x2="940" y2="105" stroke={C.svgLine} strokeWidth="1.5" />
+      <line x1="860" y1="190" x2="940" y2="190" stroke={C.svgLine} strokeWidth="1.5" />
+      <line x1="900" y1="225" x2="900" y2="190" stroke={C.svgLine} strokeWidth="1.5" markerEnd="url(#arrow)" />
+  {/* RIght side 35 mm */}
+      <SvgCard
+        x={735}
+        y={205}
+        label="Outer Diameter"
+        high="35.2"
+        low="34.8"
+        value="35"
+        C={C}
+      />
+
+
+     
+    
+
     </svg>
   );
 }
-function BottomDiagramSvg({ C }: DiagramSvgProps) {
+
+function BottomDiagramSvg({ C, pinStatuses }: DiagramSvgProps) {
   return (
-    <svg viewBox="0 0 1100 300" preserveAspectRatio="xMidYMid meet" style={{ width: "100%", height: "100%", display: "block" }}>
-      <image href="/images/6630865inspectionbottom.png" x="0" y="0" width="1100" height="300" preserveAspectRatio="xMidYMid meet" />
+
+    <svg
+      viewBox="0 0 1100 300"
+      preserveAspectRatio="xMidYMid meet"
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "block",
+      }}
+    >
+      {/* 🔥 IMAGE INSIDE SVG */}
+      <image
+        href="/images/6630865inspectionbottom.png"
+        x="0"
+        y="0"
+        width="1100"
+        height="300"
+        preserveAspectRatio="xMidYMid meet"
+      />       <defs>
+        <marker
+          id="arrow"
+          markerWidth="6"
+          markerHeight="6"
+          refX="5"
+          refY="3"
+          orient="auto-start-reverse"
+          markerUnits="strokeWidth"
+        >
+          <path
+            d="M0,0 L6,3 L0,6 Z"
+            fill={C.svgLine}
+          />
+        </marker>
+      </defs>
+
+      {/* bottom 56degree hole  special 4mm/51 degree */}
+      <circle cx={725} cy={135} r="6" stroke={C.svgRing} strokeWidth="4" fill="none" />
+      <line x1="725" y1="142" x2="725" y2="58" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
+      <SvgCard x={660} y={15} label="Hole Diameter" high="4.0" low="4.2" value="4.1" C={C} />
+
+      {/* ---------3nos 3 pin continously */} 
+      {/* bottom1 hole */}
+      <circle cx={225} cy={173} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />
+      {/* bottom2 hole */}
+      <circle cx={440} cy={173} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />
+      {/* bottom3 hole */}
+      <circle cx={966} cy={173} r="5" stroke={C.svgRing} strokeWidth="3" fill="none" />
+
+      {/* top  4.1*/}
+      <circle cx={25} cy={60} r="6" stroke={C.svgRing} strokeWidth="4" fill="none" />
+      <line x1="25" y1="55" x2="100" y2="5" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
+
+      <SvgCard x={100} y={-25} label="Hole Diameter" high="4.0" low="4.2" value="4.1" C={C} />
+      {/* -------------- */}
+      {/* top  6.2*/}
+      <circle cx={52} cy={60} r="13" stroke={C.svgRing} strokeWidth="4" fill="none" />
+      <line x1="70" y1="60" x2="250" y2="60" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
+      <SvgCard x={250} y={32} label="Reamer Diameter" high="6.2" low="6.1" value="6.2" C={C} />
+
+
+
+      {/* bottom 4.1*/}
+      <circle cx={1036} cy={246} r="6" stroke={C.svgRing} strokeWidth="4" fill="none" />
+      <line x1="870" y1="245" x2="1030" y2="245" stroke={C.svgLine} strokeWidth="1.5" markerEnd="url(#arrow)" />
+      <SvgCard x={750} y={215} label="Hole Diameter" high="4.0" low="4.2" value="4.1" C={C} />
+
+
+
+
+      {/* bottom 6.2*/}
+      <circle cx={1062} cy={246} r="13" stroke={C.svgRing} strokeWidth="4" fill="none" />
+      <line x1="1060" y1="265" x2="1060" y2="300" stroke={C.svgLine} strokeWidth="1.5" markerStart="url(#arrow)" />
+      <line x1="990" y1="300" x2="1060" y2="300" stroke={C.svgLine} strokeWidth="1.5" />
+      <SvgCard x={870} y={280} label="Reamer Hole" high="6.2" low="6.1" value="6.2" C={C} />
+
+
+
+
     </svg>
   );
 }
+
 function DiagramFullscreenModal({
   view,
   onClose,
@@ -1657,12 +1925,16 @@ function Inspection1Dashboard() {
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [actuals, setActuals] = useState<Record<number, Record<number, number | null>>>({});
   const [pinStatuses, setPinStatuses] = useState<PlcPinStatus[]>(() => empty15PinStatuses());
+  const [smallPinStatuses, setSmallPinStatuses] = useState<PlcPinStatus[]>(() => empty3PinStatuses());
+  const [specialStatuses, setSpecialStatuses] = useState<PlcPinStatus[]>(() => empty3PinStatuses());
   const [total, setTotal] = useState<number | null>(null);
   const [okCount, setOkCount] = useState<number | null>(null);
   const [ngCount, setNgCount] = useState<number | null>(null);
   const [inspectionData, setInspectionData] = useState<InspectionApiPayload | null>(null);
+  const [station3, setStation3] = useState<Station3Data | null>(null);
   const [hoveredStation, setHoveredStation] = useState<number | null>(null);
   const [fullscreenView, setFullscreenView] = useState<"front" | "bottom" | null>(null);
+  const router = useRouter();
 
   const stationIds = stations.map(s => s.id);
   const nextId = (id: number) => {
@@ -1681,16 +1953,28 @@ function Inspection1Dashboard() {
         const data: InspectionApiPayload = await response.json();
         if (!alive) return;
 
+        const activeRoute = MODEL_ROUTES[data.modelNo];
+        if (activeRoute && data.modelNo !== CURRENT_MODEL_NO) {
+          router.replace(activeRoute);
+          return;
+        }
+
         setInspectionData(data);
         setActuals(data.actuals);
         const communicating = data.source.connected;
         setPinStatuses(communicating ? data.pinStatuses?.holes15 ?? empty15PinStatuses() : empty15PinStatuses());
+        setSmallPinStatuses(communicating ? data.pinStatuses?.holes3 ?? empty3PinStatuses() : empty3PinStatuses());
+        setSpecialStatuses(communicating ? data.pinStatuses?.special ?? empty3PinStatuses() : empty3PinStatuses());
+        setStation3(communicating ? data.station3 ?? null : null);
         setTotal(communicating ? data.summary.total : null);
         setOkCount(communicating ? data.summary.ok : null);
         setNgCount(communicating ? data.summary.ng : null);
       } catch (error) {
         console.error("Inspection data refresh failed:", error);
         setPinStatuses(empty15PinStatuses());
+        setSmallPinStatuses(empty3PinStatuses());
+        setSpecialStatuses(empty3PinStatuses());
+        setStation3(null);
         setTotal(null);
         setOkCount(null);
         setNgCount(null);
@@ -1703,7 +1987,7 @@ function Inspection1Dashboard() {
       alive = false;
       clearInterval(iv);
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!fullscreenView) return;
@@ -1877,8 +2161,8 @@ function Inspection1Dashboard() {
           }}
         >
           <Station01Panel actuals={actuals[1] ?? {}} C={rightC} />
-          <Station02Panel pinStatuses={pinStatuses} C={rightC} />
-          <Station03Panel C={rightC} />
+          <Station02Panel pinStatuses={pinStatuses} smallPinStatuses={smallPinStatuses} specialStatuses={specialStatuses} C={rightC} />
+          <Station03Panel station3={station3} C={rightC} />
           <Station456Panel actuals={actuals} C={rightC} />
         </div>
       </div>

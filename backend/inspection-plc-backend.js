@@ -26,7 +26,7 @@ loadEnvFile(".env");
 
 const DEFAULTS = {
   host: "192.168.3.39",
-  port: 502,
+  port: 5010,
   device: "D",
   startAddress: 2100,
   count: 50,

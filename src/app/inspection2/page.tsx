@@ -2,11 +2,17 @@
 
 import { useState, useEffect, useRef } from "react";
 import React from "react";
-import type { InspectionApiPayload } from '../../lib/inspectionDataService';
+import type { InspectionApiPayload, PlcPinStatus } from '../../lib/inspectionDataService';
 import { Activity, ArrowRight, CheckCircle2, Gauge, Maximize2, QrCode, ScanLine, X, XCircle } from "lucide-react";
 import { useTheme } from "./components/ThemeContext";
+import { useRouter } from "next/navigation";
 
 const CURRENT_MODEL_NO = "6630867";
+const MODEL_ROUTES: Record<string, string> = {
+  "6630865": "/inspection1",
+  "6630867": "/inspection2",
+  "6630862": "/inspection3",
+};
 /* ═══════════════════════════════════════════════════════════
   DATA
 ═══════════════════════════════════════════════════════════ */
@@ -72,6 +78,11 @@ function isPass(req: number | null, tol: number | null, val: number | null): boo
   if (req === null || tol === null || val === null) return true;
   return val >= req - tol && val <= req + tol;
 }
+const empty15PinStatuses = (): PlcPinStatus[] => Array.from({ length: 15 }, () => null);
+const empty3PinStatuses = (): PlcPinStatus[] => Array.from({ length: 3 }, () => null);
+const pinStatusLabel = (status: PlcPinStatus) => status === 4 ? "OK" : status === 5 ? "NG" : status === 2 ? "LOAD" : "-";
+const pinStatusTone = (status: PlcPinStatus, C: T) => status === 4 ? C.ok : status === 5 ? C.ng : status === 2 ? "#f97316" : C.txtMid;
+const pinStatusSoftTone = (status: PlcPinStatus, C: T) => status === 4 ? C.okSoft : status === 5 ? C.ngSoft : status === 2 ? "rgba(249,115,22,0.14)" : C.cellNeutral;
 function genPins(count: number, seed: number): boolean[] {
   return Array.from({ length: count }, (_, i) => ((seed * 31 + i * 17 + count * 7) % 100) > 12);
 }
@@ -488,9 +499,9 @@ function TblSectionHeader({
 
 /* Single value cell — assembly-style OK/NG card */
 function ValCell({
-  value, pass, unit, label, rangeLabel, C, width, fontSize
+  id, value, pass, unit, label, rangeLabel, C, width, fontSize
 }: {
-  value: string | null; pass: boolean | null; unit?: string; label?: string; rangeLabel?: string; C: T;
+  id?: string; value: string | null; pass: boolean | null; unit?: string; label?: string; rangeLabel?: string; C: T;
   width?: string | number; fontSize?: string;
 }) {
   const tone = pass === null ? C.txtDim : pass ? C.ok : C.ng;
@@ -501,7 +512,7 @@ function ValCell({
       ? (C.isDark ? "rgba(34,197,94,0.38)" : C.brd)
       : (C.isDark ? "rgba(239,68,68,0.42)" : C.brd);
   return (
-    <div style={{
+    <div id={id} style={{
       position: "relative",
       background: bg,
       borderRadius: 3,
@@ -820,34 +831,38 @@ function Station01Panel({
 /* ═══════════════════════════════════════════════════════════
   STATION 02 — pin matrix layout
 ═══════════════════════════════════════════════════════════ */
-function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
-  type PinCell = { n: number; pass: boolean; label: string };
-  const pins15 = genPins(15, pinSeed);
-  const pins3 = genPins(3, pinSeed + 50);
-  const fourMm51 = genPins(1, pinSeed + 100)[0];
-  const slot12213 = genPins(1, pinSeed + 200)[0];
-
-  // ---- SPLIT DATA PROPERLY ----
-  const col1 = pins15.map((p, i) => ({
+function Station02Panel({
+  pinStatuses,
+  smallPinStatuses,
+  specialStatuses,
+  C,
+}: {
+  pinStatuses: PlcPinStatus[];
+  smallPinStatuses: PlcPinStatus[];
+  specialStatuses: PlcPinStatus[];
+  C: T;
+}) {
+  type PinCell = { n: number; status: PlcPinStatus; label: string };
+  const col1 = Array.from({ length: 15 }, (_, i) => ({
     n: i + 1,
-    pass: p,
+    status: pinStatuses[i] ?? null,
     label: String(i + 1).padStart(2, "0"),
   }));
 
-  const col2 = pins3.map((p, i) => ({
+  const col2 = Array.from({ length: 3 }, (_, i) => ({
     n: i + 16,
-    pass: p,
+    status: smallPinStatuses[i] ?? null,
     label: String(i + 1).padStart(2, "0"),
   }));
 
   const col3 = [
-    { n: 19, pass: fourMm51, label: "4mm / 51°" },
-    { n: 20, pass: slot12213, label: "12.2–13" },
-    { n: 21, pass: genPins(1, pinSeed + 300)[0], label: "Slot" }, // replace if real name exists
+    { n: 19, status: specialStatuses[0] ?? null, label: "4mm / 51deg" },
+    { n: 20, status: specialStatuses[1] ?? null, label: "12.2-13" },
+    { n: 21, status: specialStatuses[2] ?? null, label: "Slot" },
   ];
   const allPins = [...col1, ...col2, ...col3];
-  const okCount = allPins.filter(cell => cell.pass).length;
-  const ngCount = allPins.length - okCount;
+  const okCount = allPins.filter(cell => cell.status === 4).length;
+  const ngCount = allPins.filter(cell => cell.status === 5).length;
 
 
 
@@ -860,8 +875,8 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
         gridTemplateRows: "1fr",
         alignItems: "center",
         background: C.isDark ? C.card : "#f8fafc",
-        ...sideBorders(`1.5px solid ${C.isDark ? (cell.pass ? "rgba(34,197,94,0.48)" : "rgba(239,68,68,0.54)") : C.brd}`),
-        borderTop: `3px solid ${cell.pass ? C.ok : C.ng}`,
+        ...sideBorders(`1.5px solid ${C.isDark ? pinStatusTone(cell.status, C) : C.brd}`),
+        borderTop: `3px solid ${pinStatusTone(cell.status, C)}`,
         borderRadius: 3,
         padding: `clamp(6px,0.62vh,10px) clamp(8px,0.64vw,13px)`,
         minHeight: "clamp(44px,5.2vh,62px)",
@@ -876,7 +891,7 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
           alignSelf: "center",
           fontSize: fs.sm,
           fontWeight: 900,
-          color: cell.pass ? C.ok : C.ng,
+          color: pinStatusTone(cell.status, C),
           lineHeight: 1.05,
           whiteSpace: "normal",
           overflowWrap: "anywhere",
@@ -894,16 +909,16 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
           minWidth: 38,
           borderRadius: 3,
           padding: "4px 7px",
-          background: cell.pass ? C.okSoft : C.ngSoft,
-          border: `1px solid ${cell.pass ? C.ok : C.ng}`,
+          background: pinStatusSoftTone(cell.status, C),
+          border: `1px solid ${pinStatusTone(cell.status, C)}`,
           fontSize: "clamp(9px, min(0.75vw, 1.25vh), 12px)",
           fontWeight: 900,
-          color: cell.pass ? C.ok : C.ng,
+          color: pinStatusTone(cell.status, C),
           lineHeight: 1,
           textAlign: "center",
         }}
       >
-        {cell.pass ? "OK" : "NG"}
+        {pinStatusLabel(cell.status)}
       </span>
     </div>
   );
@@ -1042,13 +1057,24 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
 ═══════════════════════════════════════════════════════════ */
 
 
-function Station03Panel({ C }: { C: T }) {
+type Station3Data = NonNullable<InspectionApiPayload["station3"]>;
+type Station03Cell = { name: string; pass: boolean | null; grade?: string | null };
+
+function plcStatusToPass(status: PlcPinStatus): boolean | null {
+  if (status === 4) return true;
+  if (status === 5) return false;
+  return null;
+}
+
+function Station03Panel({ station3, C }: { station3: Station3Data | null; C: T }) {
   const cols = [
-    { name: "2D Marking", pass: true },
-    { name: "Top Engraving", pass: true },
-    { name: "Side Engraving", pass: true },
-    { name: "Verifier", pass: true, grade: "A" },
+    { name: "2D Marking", pass: plcStatusToPass(station3?.marking2d ?? null) },
+    { name: "Top Engraving", pass: plcStatusToPass(station3?.topEngraving ?? null) },
+    { name: "Side Engraving", pass: plcStatusToPass(station3?.sideEngraving ?? null) },
+    { name: "Verifier", pass: station3?.qrVerifierValue ? true : null, grade: station3?.qrGrade ?? station3?.qrVerifierValue ?? null },
   ];
+  const knownResults = cols.filter(col => col.pass !== null || col.grade);
+  const allOk = knownResults.length > 0 && knownResults.every(col => col.pass !== false);
 
   return (
     <div
@@ -1070,7 +1096,7 @@ function Station03Panel({ C }: { C: T }) {
         name="LASER MARKING"
         C={C}
         accent="#0ea5e9"
-        right={<StatusPill label="ALL OK" tone="ok" C={C} />}
+        right={allOk ? <StatusPill label="ALL OK" tone="ok" C={C} /> : null}
       />
 
       {/* 4-column grid */}
@@ -1092,7 +1118,7 @@ function Station03Panel({ C }: { C: T }) {
               display: "flex",
               flexDirection: "column",
               ...sideBorders(`1.5px solid ${C.brd}`),
-              borderTop: `3px solid ${col.grade ? "#0f4c8a" : C.ok}`,
+              borderTop: `3px solid ${col.pass === null ? C.txtDim : col.grade ? "#0f4c8a" : col.pass ? C.ok : C.ng}`,
               borderRadius: 3,
               overflow: "hidden",
               minHeight: "clamp(86px,9vh,116px)",
@@ -1168,15 +1194,15 @@ function Station03Panel({ C }: { C: T }) {
                     minWidth: 50,
                     borderRadius: 3,
                     padding: "7px 12px",
-                    background: col.pass ? C.okSoft : C.ngSoft,
-                    border: `1px solid ${col.pass ? C.ok : C.ng}`,
+                    background: col.pass === null ? C.cellNeutral : col.pass ? C.okSoft : C.ngSoft,
+                    border: `1px solid ${col.pass === null ? C.txtDim : col.pass ? C.ok : C.ng}`,
                     fontSize: "clamp(13px,1.05vw,18px)",
                     fontWeight: 900,
-                    color: col.pass ? C.ok : C.ng,
+                    color: col.pass === null ? C.txtDim : col.pass ? C.ok : C.ng,
                     lineHeight: 1,
                   }}
                 >
-                  {col.pass ? "OK" : "NG"}
+                  {col.pass === null ? "-" : col.pass ? "OK" : "NG"}
                 </span>
               )}
             </div>
@@ -1312,8 +1338,15 @@ function DiagramFullscreenButton({ label, onClick, C }: { label: string; onClick
 const svgSpecLow = (param: Param) => param.req !== null && param.tol !== null ? String(param.req - param.tol) : "";
 const svgSpecHigh = (param: Param) => param.req !== null && param.tol !== null ? String(param.req + param.tol) : "";
 const svgActualValue = (param: Param, value: number | null | undefined) => String(value ?? param.req ?? "");
+type DiagramSvgProps = {
+  C: T;
+  actuals: Record<number, Record<number, number | null>>;
+  pinStatuses: PlcPinStatus[];
+  smallPinStatuses: PlcPinStatus[];
+  specialStatuses: PlcPinStatus[];
+};
 
-function FrontDiagramSvg({ C, actuals }: { C: T; actuals: Record<number, Record<number, number | null>> }) {
+function FrontDiagramSvg({ C, actuals, pinStatuses }: DiagramSvgProps) {
   const st1 = stations[0];
   const st6 = stations[5];
   const st1a = actuals[1] ?? {};
@@ -1466,7 +1499,7 @@ function FrontDiagramSvg({ C, actuals }: { C: T; actuals: Record<number, Record<
   );
 }
 
-function BottomDiagramSvg({ C, actuals }: { C: T; actuals: Record<number, Record<number, number | null>> }) {
+function BottomDiagramSvg({ C, actuals, smallPinStatuses, specialStatuses }: DiagramSvgProps) {
   const st5 = stations[4];
   const st6 = stations[5];
   const st5a = actuals[5] ?? {};
@@ -1850,12 +1883,16 @@ export default function Dashboard() {
   const [completedIds, setCompletedIds] = useState<number[]>([]);
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [actuals, setActuals] = useState<Record<number, Record<number, number | null>>>({});
-  const [pinSeed, setPinSeed] = useState(42);
+  const [pinStatuses, setPinStatuses] = useState<PlcPinStatus[]>(() => empty15PinStatuses());
+  const [smallPinStatuses, setSmallPinStatuses] = useState<PlcPinStatus[]>(() => empty3PinStatuses());
+  const [specialStatuses, setSpecialStatuses] = useState<PlcPinStatus[]>(() => empty3PinStatuses());
+  const [station3, setStation3] = useState<Station3Data | null>(null);
   const [total, setTotal] = useState(0);
   const [okCount, setOkCount] = useState(0);
   const [ngCount, setNgCount] = useState(0);
   const [hoveredStation, setHoveredStation] = useState<number | null>(null);
   const [fullscreenView, setFullscreenView] = useState<"front" | "bottom" | null>(null);
+  const router = useRouter();
 
   const stationIds = stations.map(s => s.id);
   const nextId = (id: number) => {
@@ -1874,13 +1911,27 @@ export default function Dashboard() {
         const data: InspectionApiPayload = await response.json();
         if (!alive) return;
 
+        const activeRoute = MODEL_ROUTES[data.modelNo];
+        if (activeRoute && data.modelNo !== CURRENT_MODEL_NO) {
+          router.replace(activeRoute);
+          return;
+        }
+
         setActuals(data.actuals);
+        const communicating = data.source.connected;
+        setPinStatuses(communicating ? data.pinStatuses?.holes15 ?? empty15PinStatuses() : empty15PinStatuses());
+        setSmallPinStatuses(communicating ? data.pinStatuses?.holes3 ?? empty3PinStatuses() : empty3PinStatuses());
+        setSpecialStatuses(communicating ? data.pinStatuses?.special ?? empty3PinStatuses() : empty3PinStatuses());
+        setStation3(communicating ? data.station3 ?? null : null);
         setTotal(data.summary.total);
         setOkCount(data.summary.ok);
         setNgCount(data.summary.ng);
-        setPinSeed(s => s + 1);
       } catch (error) {
         console.error("Inspection data refresh failed:", error);
+        setPinStatuses(empty15PinStatuses());
+        setSmallPinStatuses(empty3PinStatuses());
+        setSpecialStatuses(empty3PinStatuses());
+        setStation3(null);
       }
     };
 
@@ -1890,7 +1941,7 @@ export default function Dashboard() {
       alive = false;
       clearInterval(iv);
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!fullscreenView) return;
@@ -2022,9 +2073,9 @@ export default function Dashboard() {
           }}
         >
           <Station01Panel actuals={actuals[1] ?? {}} C={rightC} />
-          <Station02Panel pinSeed={pinSeed} C={rightC} />
-          <Station03Panel C={rightC} />
-          <Station456Panel actuals={actuals} C={rightC} />
+          <Station02Panel pinStatuses={pinStatuses} smallPinStatuses={smallPinStatuses} specialStatuses={specialStatuses} C={rightC} />
+         <Station03Panel station3={station3} C={rightC} />
+           <Station456Panel actuals={actuals} C={rightC} />
         </div>
       </div>
     </div>
