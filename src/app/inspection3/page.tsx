@@ -731,16 +731,16 @@ function Station01Panel({
           <span style={headerText}>Overall</span>
         </div>
         <div style={baseCell}>
-          <span style={headerText}>Dowel Length</span>
+          <span style={headerText}>Length Fr Dowel</span>
         </div>
         <div style={baseCell}>
           <span style={headerText}>12.2 Diameter</span>
         </div>
         <div style={baseCell}>
-          <span style={headerText}></span>
+          <span style={headerText}>2D Presense</span>
         </div>
         <div style={{ ...baseCell, borderRight: "none" }}>
-          <span style={headerText}></span>
+          <span style={headerText}>Dowel to Dowel</span>
         </div>
       </div>
       {/* VALUES */}
@@ -1951,6 +1951,7 @@ export default function Dashboard() {
   const [activeId, setActiveId] = useState(1);
   const [completedIds, setCompletedIds] = useState<number[]>([]);
   const [loadingId, setLoadingId] = useState<number | null>(null);
+  const [inspectionData, setInspectionData] = useState<InspectionApiPayload | null>(null);
   const [actuals, setActuals] = useState<Record<number, Record<number, number | null>>>({});
   const [pinSeed, setPinSeed] = useState(42);
   const [total, setTotal] = useState(0);
@@ -1984,6 +1985,7 @@ export default function Dashboard() {
         }
 
         setActuals(data.actuals);
+        setInspectionData(data);
         setTotal(data.summary.total);
         setOkCount(data.summary.ok);
         setNgCount(data.summary.ng);
@@ -2049,6 +2051,43 @@ export default function Dashboard() {
         minHeight: 0,
         minWidth: 0,
       }}>
+        {/* Header */}
+        <div style={{
+          height: "clamp(36px,4.6vh,52px)",
+          display: "flex", alignItems: "center",
+          padding: `0 ${sp.md}`, gap: sp.sm,
+          borderBottom: `1px solid ${C.brd}`,
+          background: C.hdr, flexShrink: 0,
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                ...MONO,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                fontSize: "clamp(9px,0.58vw,12px)",
+                fontWeight: 800,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+              }}
+            >
+              <div style={{ color: C.txtMid }}>
+                Component Assembly
+              </div>
+              <div style={{ display: "flex", gap: sp.xs, minWidth: 0, whiteSpace: "nowrap" }}>
+                <span style={{ color: C.txtMid }}>Component No :</span>
+                <span id="componentNumber" style={{ color: C.accent }}>{inspectionData?.header.componentNo ?? "--"}</span>
+              </div>
+              <div style={{ display: "flex", gap: sp.xs, minWidth: 0, whiteSpace: "nowrap" }}>
+                <span style={{ color: C.txtMid }}>Model No :</span>
+                <span id="modelNumber" style={{ color: C.accent }}>{inspectionData?.header.modelNumber ?? "--"}</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
         {/* FRONT VIEW */}
         <div style={{ flex: "1 1 0", display: "flex", flexDirection: "column", borderBottom: `1px solid ${C.brd}`, minHeight: 0 }}>
           <div style={{ padding: `${sp.xs} ${sp.md}`, borderBottom: `1px solid ${C.brd}`, background: C.hdr, flexShrink: 0, display: "flex", alignItems: "center", gap: sp.sm }}>
