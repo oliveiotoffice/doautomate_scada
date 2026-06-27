@@ -1,7 +1,7 @@
 export type InspectionValueMap = Record<number, Record<number, number | null>>;
 
 export type InspectionModelNo = string;
-export type PlcPinStatus = 2 | 4 | 5 | null;
+export type PlcPinStatus = 0 | 1 | 2 | 3 | 4 | 5 | null;
 
 export type InspectionHeader = {
   shaftNumber: string;
@@ -42,6 +42,21 @@ export type InspectionApiPayload = {
     holes3?: PlcPinStatus[];
     special?: PlcPinStatus[];
   };
+  statusRegisters?: {
+    station1?: {
+      presence3d?: PlcPinStatus;
+    };
+    station2?: {
+      holes15?: PlcPinStatus[];
+      holes3?: PlcPinStatus[];
+      special?: PlcPinStatus[];
+    };
+    station3?: {
+      marking2d?: PlcPinStatus;
+      topEngraving?: PlcPinStatus;
+      sideEngraving?: PlcPinStatus;
+    };
+  };
   station3?: {
     marking2d: PlcPinStatus;
     topEngraving: PlcPinStatus;
@@ -63,11 +78,12 @@ export type InspectionApiPayload = {
 };
 
 const CURRENT_MODEL_NO: InspectionModelNo = "6630865";
+const NONE_MODEL_NO: InspectionModelNo = "0";
 const PIN_COUNT = 15;
 const SMALL_PIN_COUNT = 3;
 const DEFAULT_BACKEND_URL = "http://localhost:4000";
-const EMPTY_PIN_STATUSES: PlcPinStatus[] = Array.from({ length: PIN_COUNT }, () => null);
-const EMPTY_SMALL_PIN_STATUSES: PlcPinStatus[] = Array.from({ length: SMALL_PIN_COUNT }, () => null);
+const EMPTY_PIN_STATUSES: PlcPinStatus[] = Array.from({ length: PIN_COUNT }, () => 0);
+const EMPTY_SMALL_PIN_STATUSES: PlcPinStatus[] = Array.from({ length: SMALL_PIN_COUNT }, () => 0);
 const EMPTY_HEADER: InspectionHeader = {
   shaftNumber: "-",
   operatorId: "-",
@@ -81,7 +97,7 @@ function normalizeBackendUrl() {
 
 function normalizeStatus(value: unknown): PlcPinStatus {
   const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-  if (numeric === 2 || numeric === 4 || numeric === 5) return numeric;
+  if (numeric === 0 || numeric === 1 || numeric === 2 || numeric === 3 || numeric === 4 || numeric === 5) return numeric;
   return null;
 }
 
@@ -145,11 +161,11 @@ function normalizeHeader(payload: unknown): InspectionHeader {
 }
 
 function summarizePins(statuses: PlcPinStatus[]) {
-  const completed = statuses.filter(status => status !== null).length;
+  const completed = statuses.filter(status => status !== null && status !== 0).length;
   return {
     total: completed,
     ok: statuses.filter(status => status === 4).length,
-    ng: statuses.filter(status => status === 5).length,
+    ng: statuses.filter(status => status === 3 || status === 5).length,
   };
 }
 
@@ -171,9 +187,9 @@ function mockActual(base: number, offset: number, decimals = 3) {
 
 function boolSummary(statuses: PlcPinStatus[]) {
   return {
-    total: statuses.filter(status => status !== null).length,
+    total: statuses.filter(status => status !== null && status !== 0).length,
     ok: statuses.filter(status => status === 4).length,
-    ng: statuses.filter(status => status === 5).length,
+    ng: statuses.filter(status => status === 3 || status === 5).length,
   };
 }
 
@@ -358,7 +374,7 @@ function normalizeCommon(payload: unknown, header: InspectionHeader): Inspection
   return {
     shift: numberValue(common.shift) ?? "-",
     operator: textValue(common.operator, header.operatorId),
-    modelNo: textValue(common.modelNo ?? root?.modelNo, "-"),
+    modelNo: textValue(common.modelNo ?? root?.modelNo, NONE_MODEL_NO),
     componentNo: textValue(common.componentNo ?? root?.componentNo, header.componentNo),
     rtc: normalizeRtc(common.rtc),
   };
@@ -402,7 +418,7 @@ async function readFromBackend() {
       statuses: EMPTY_PIN_STATUSES,
       summary: { total: 0, ok: 0, ng: 0 },
       updatedAt: new Date().toISOString(),
-      modelNo: "-",
+      modelNo: NONE_MODEL_NO,
       modelNumber: "-",
       actuals: {},
       holes3: EMPTY_SMALL_PIN_STATUSES,
@@ -438,7 +454,7 @@ function normalizeActuals(payload: unknown): InspectionValueMap {
 }
 
 function normalizeStatusArray(payload: unknown, keys: string[], count: number): PlcPinStatus[] {
-  if (!payload || typeof payload !== "object") return Array.from({ length: count }, () => null);
+  if (!payload || typeof payload !== "object") return Array.from({ length: count }, () => 0);
   const root = payload as Record<string, unknown>;
   const pinStatuses = root.pinStatuses && typeof root.pinStatuses === "object"
     ? root.pinStatuses as Record<string, unknown>
@@ -451,20 +467,20 @@ function normalizeStatusArray(payload: unknown, keys: string[], count: number): 
     }
   }
 
-  return Array.from({ length: count }, () => null);
+  return Array.from({ length: count }, () => 0);
 }
 
-function emptyStation3() {
+function emptyStation3(): NonNullable<InspectionApiPayload["station3"]> {
   return {
-    marking2d: null,
-    topEngraving: null,
-    sideEngraving: null,
+    marking2d: 0,
+    topEngraving: 0,
+    sideEngraving: 0,
     qrVerifierValue: "",
     qrGrade: null,
   };
 }
 
-function normalizeStation3(payload: unknown) {
+function normalizeStation3(payload: unknown): NonNullable<InspectionApiPayload["station3"]> {
   const root = asPayloadRecord(payload);
   const station3 = root?.station3 && typeof root.station3 === "object"
     ? root.station3 as Record<string, unknown>
@@ -481,6 +497,35 @@ function normalizeStation3(payload: unknown) {
   };
 }
 
+function normalizeStatusRegisters(payload: unknown): NonNullable<InspectionApiPayload["statusRegisters"]> {
+  const root = asPayloadRecord(payload);
+  const statusRegisters = root?.statusRegisters && typeof root.statusRegisters === "object"
+    ? root.statusRegisters as Record<string, unknown>
+    : null;
+  const station1 = statusRegisters?.station1 && typeof statusRegisters.station1 === "object"
+    ? statusRegisters.station1 as Record<string, unknown>
+    : null;
+  const station3 = normalizeStation3({
+    station3: statusRegisters?.station3 ?? root?.station3,
+  });
+
+  return {
+    station1: {
+      presence3d: statusFromReading(station1?.presence3d) ?? 0,
+    },
+    station2: {
+      holes15: normalizePinStatuses(payload),
+      holes3: normalizeStatusArray(payload, ["holes3"], SMALL_PIN_COUNT),
+      special: normalizeStatusArray(payload, ["special"], SMALL_PIN_COUNT),
+    },
+    station3: {
+      marking2d: station3.marking2d,
+      topEngraving: station3.topEngraving,
+      sideEngraving: station3.sideEngraving,
+    },
+  };
+}
+
 export async function getInspectionData(modelNo?: string | null): Promise<InspectionApiPayload> {
   const requestedModelNo = (modelNo ?? CURRENT_MODEL_NO).replace(/[^0-9]/g, "");
   const normalizedModelNo: InspectionModelNo = requestedModelNo || CURRENT_MODEL_NO;
@@ -490,7 +535,7 @@ export async function getInspectionData(modelNo?: string | null): Promise<Inspec
 
   const backend = await readFromBackend();
   const backendModelNo = backend.modelNo.replace(/[^0-9]/g, "") || normalizedModelNo;
-  const backendModelNumber = backend.modelNumber !== "-" ? backend.modelNumber : `Shaft-${backendModelNo}`;
+  const backendModelNumber = backendModelNo === NONE_MODEL_NO ? "-" : backend.modelNumber !== "-" ? backend.modelNumber : `Shaft-${backendModelNo}`;
 
   return {
     header: backend.header,
@@ -504,6 +549,7 @@ export async function getInspectionData(modelNo?: string | null): Promise<Inspec
       holes3: backend.holes3,
       special: backend.special,
     },
+    statusRegisters: normalizeStatusRegisters(backend.payload),
     station3: backend.station3,
     summary: backend.summary,
     source: {

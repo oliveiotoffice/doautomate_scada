@@ -30,7 +30,7 @@ const DEFAULTS = {
   device: "D",
   startAddress: 2100,
   count: 50,
-  pollMs: 3000,
+  pollMs: 1000,
   timeoutMs: 5000,
   networkNo: 0x00,
   pcNo: 0xff,
@@ -68,7 +68,7 @@ const LOG_EVERY_POLL = String(process.env.PLC_LOG_EVERY_POLL || "").toLowerCase(
 const READ_START_REGISTER = envNumberAny(["MC_START_ADDRESS", "PLC_READ_START_REGISTER"], DEFAULTS.startAddress);
 const READ_COUNT = envNumberAny(["MC_COUNT", "PLC_READ_COUNT"], DEFAULTS.count);
 const READ_END_REGISTER = READ_START_REGISTER + READ_COUNT - 1;
-const READ_CHUNK_SIZE = Number(process.env.PLC_READ_CHUNK_SIZE || 10);
+const READ_CHUNK_SIZE = Number(process.env.PLC_READ_CHUNK_SIZE || 50);
 const NETWORK_NO = envNumberAny(["MC_NETWORK_NO", "PLC_NETWORK_NO"], DEFAULTS.networkNo);
 const PC_NO = envNumberAny(["MC_PC_NO", "PLC_PC_NO"], DEFAULTS.pcNo);
 const IO_NO = envNumberAny(["MC_IO_NO", "PLC_IO_NO"], DEFAULTS.ioNo);

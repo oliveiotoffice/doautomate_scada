@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import React from "react";
 import type { InspectionApiPayload, PlcPinStatus } from '../../lib/inspectionDataService';
 import { Activity, ArrowRight, CheckCircle2, Gauge, Maximize2, QrCode, ScanLine, X, XCircle } from "lucide-react";
+import Header from "./components/Header";
 import { useTheme } from "./components/ThemeContext";
 /* ═══════════════════════════════════════════════════════════
   DATA
@@ -61,6 +62,7 @@ const stations = [
 ];
 
 const LOADING_MS = 2000;
+const LIVE_REFRESH_MS = 1000;
 
 type Param = {
   name: string; req: number | null; tol: number | null;
@@ -70,11 +72,11 @@ function isPass(req: number | null, tol: number | null, val: number | null): boo
   if (req === null || tol === null || val === null) return true;
   return val >= req - tol && val <= req + tol;
 }
-const empty15PinStatuses = (): PlcPinStatus[] => Array.from({ length: 15 }, () => null);
-const empty3PinStatuses = (): PlcPinStatus[] => Array.from({ length: 3 }, () => null);
-const pinStatusLabel = (status: PlcPinStatus) => status === 4 ? "OK" : status === 5 ? "NG" : status === 2 ? "LOAD" : "-";
-const pinStatusTone = (status: PlcPinStatus, C: T) => status === 4 ? C.ok : status === 5 ? C.ng : status === 2 ? "#f97316" : C.txtMid;
-const pinStatusSoftTone = (status: PlcPinStatus, C: T) => status === 4 ? C.okSoft : status === 5 ? C.ngSoft : status === 2 ? "rgba(249,115,22,0.14)" : C.cellNeutral;
+const empty15PinStatuses = (): PlcPinStatus[] => Array.from({ length: 15 }, () => 0);
+const empty3PinStatuses = (): PlcPinStatus[] => Array.from({ length: 3 }, () => 0);
+const pinStatusLabel = (status: PlcPinStatus) => status === 4 ? "OK" : status === 3 || status === 5 ? "NG" : status === 2 ? "LOAD" : status === 1 ? "READY" : "-";
+const pinStatusTone = (status: PlcPinStatus, C: T) => status === 4 ? C.ok : status === 3 || status === 5 ? C.ng : status === 2 ? "#f97316" : status === 1 ? "#2563eb" : C.txtMid;
+const pinStatusSoftTone = (status: PlcPinStatus, C: T) => status === 4 ? C.okSoft : status === 3 || status === 5 ? C.ngSoft : status === 2 ? "rgba(249,115,22,0.14)" : status === 1 ? "rgba(37,99,235,0.14)" : C.cellNeutral;
 function genPins(count: number, seed: number): boolean[] {
   return Array.from({ length: count }, (_, i) => ((seed * 31 + i * 17 + count * 7) % 100) > 12);
 }
@@ -854,7 +856,7 @@ function Station02Panel({
   ];
   const allPins = [...col1, ...col2, ...col3];
   const okCount = allPins.filter(cell => cell.status === 4).length;
-  const ngCount = allPins.filter(cell => cell.status === 5).length;
+  const ngCount = allPins.filter(cell => cell.status === 3 || cell.status === 5).length;
 
 
 
@@ -1050,23 +1052,17 @@ function Station02Panel({
 
 
 type Station3Data = NonNullable<InspectionApiPayload["station3"]>;
-type Station03Cell = { name: string; pass: boolean | null; grade?: string | null };
-
-function plcStatusToPass(status: PlcPinStatus): boolean | null {
-  if (status === 4) return true;
-  if (status === 5) return false;
-  return null;
-}
+type Station03Cell = { name: string; status: PlcPinStatus; grade?: string | null };
 
 function Station03Panel({ station3, C }: { station3: Station3Data | null; C: T }) {
-  const cols = [
-    { name: "2D Marking", pass: plcStatusToPass(station3?.marking2d ?? null) },
-    { name: "Top Engraving", pass: plcStatusToPass(station3?.topEngraving ?? null) },
-    { name: "Side Engraving", pass: plcStatusToPass(station3?.sideEngraving ?? null) },
-    { name: "Verifier", pass: station3?.qrVerifierValue ? true : null, grade: station3?.qrGrade ?? station3?.qrVerifierValue ?? null },
+  const cols: Station03Cell[] = [
+    { name: "2D Marking", status: station3?.marking2d ?? 0 },
+    { name: "Top Engraving", status: station3?.topEngraving ?? 0 },
+    { name: "Side Engraving", status: station3?.sideEngraving ?? 0 },
+    { name: "Verifier", status: station3?.qrVerifierValue ? 4 : 0, grade: station3?.qrGrade ?? station3?.qrVerifierValue ?? null },
   ];
-  const knownResults = cols.filter(col => col.pass !== null || col.grade);
-  const allOk = knownResults.length > 0 && knownResults.every(col => col.pass !== false);
+  const knownResults = cols.filter(col => col.status !== 0 || col.grade);
+  const allOk = knownResults.length > 0 && knownResults.every(col => col.status === 4 || Boolean(col.grade));
 
   return (
     <div
@@ -1110,7 +1106,7 @@ function Station03Panel({ station3, C }: { station3: Station3Data | null; C: T }
               display: "flex",
               flexDirection: "column",
               ...sideBorders(`1.5px solid ${C.brd}`),
-              borderTop: `3px solid ${col.pass === null ? C.txtDim : col.grade ? "#0f4c8a" : col.pass ? C.ok : C.ng}`,
+              borderTop: `3px solid ${col.grade ? "#0f4c8a" : pinStatusTone(col.status, C)}`,
               borderRadius: 3,
               overflow: "hidden",
               minHeight: "clamp(86px,9vh,116px)",
@@ -1173,7 +1169,7 @@ function Station03Panel({ station3, C }: { station3: Station3Data | null; C: T }
                       textAlign: "center",
                     }}
                   >
-                    QR | GRADE {col.grade}
+                     {col.grade}
                   </span>
                 </>
               ) : (
@@ -1186,15 +1182,15 @@ function Station03Panel({ station3, C }: { station3: Station3Data | null; C: T }
                     minWidth: 50,
                     borderRadius: 3,
                     padding: "7px 12px",
-                    background: col.pass === null ? C.cellNeutral : col.pass ? C.okSoft : C.ngSoft,
-                    border: `1px solid ${col.pass === null ? C.txtDim : col.pass ? C.ok : C.ng}`,
+                    background: pinStatusSoftTone(col.status, C),
+                    border: `1px solid ${pinStatusTone(col.status, C)}`,
                     fontSize: "clamp(13px,1.05vw,18px)",
                     fontWeight: 900,
-                    color: col.pass === null ? C.txtDim : col.pass ? C.ok : C.ng,
+                    color: pinStatusTone(col.status, C),
                     lineHeight: 1,
                   }}
                 >
-                  {col.pass === null ? "-" : col.pass ? "OK" : "NG"}
+                  {pinStatusLabel(col.status)}
                 </span>
               )}
             </div>
@@ -1955,7 +1951,7 @@ export default function Dashboard() {
     };
 
     refresh();
-    const iv = setInterval(refresh, 5000);
+    const iv = setInterval(refresh, LIVE_REFRESH_MS);
     return () => {
       alive = false;
       clearInterval(iv);
@@ -1982,6 +1978,20 @@ export default function Dashboard() {
   };
 
   return (
+    <div style={{
+      flex: 1,
+      display: "flex",
+      flexDirection: "column",
+      width: "100%",
+      height: "100%",
+      minWidth: 0,
+      minHeight: 0,
+      overflow: "hidden",
+      background: C.bg,
+      color: C.txt,
+      fontFamily: "'Montserrat', sans-serif",
+    }}>
+      <Header name="Super Admin" role="admin" />
     <div style={{
       flex: 1,
       display: "flex",
@@ -2141,6 +2151,7 @@ export default function Dashboard() {
            <Station456Panel actuals={actuals} C={rightC} />
         </div>
       </div>
+    </div>
     </div>
   );
 }

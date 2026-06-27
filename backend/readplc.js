@@ -7,12 +7,13 @@ const {
   wordsToDateTime,
   wordsToFloat,
   wordsToString,
+  wordsToUInt32,
   wordsToUInt64,
 } = require("./plc-layout");
 
 const MODEL_END = 10699;
 const READ_COUNT = MODEL_END - AREA_START + 1;
-const DEFAULT_READ_INTERVAL_MS = 3000;
+const DEFAULT_READ_INTERVAL_MS = 1000;
 const DEFAULT_ERROR_DELAY_MS = 10000;
 const STATION2_LABELS = [
   "3 mm Hole 1",
@@ -51,11 +52,11 @@ function sleep(ms) {
 }
 
 function boolLabel(value) {
-  if (value === 4) return "OK";
-  if (value === 5) return "NG";
+  if (value === 0) return "NONE";
+  if (value === 1) return "READY";
   if (value === 2) return "LOADING";
-  if (value === 1) return "OK";
-  if (value === 0) return "NG";
+  if (value === 3 || value === 5) return "NG";
+  if (value === 4) return "OK";
   return String(value);
 }
 
@@ -89,8 +90,8 @@ function decodeCommon(area) {
   return {
     shift: getWords(area, 10000, 1)[0],
     operator: wordsToString(getWords(area, 10001, 10)),
-    modelNo: getWords(area, 10011, 1)[0],
-    componentNo: wordsToUInt64(getWords(area, 10012, 4)),
+    modelNo: wordsToUInt32(...getWords(area, 10011, 2)),
+    componentNo: wordsToUInt64(getWords(area, 10013, 4)),
     rtc,
     total: getWords(area, 10030, 1)[0],
     ok: getWords(area, 10031, 1)[0],

@@ -1,6 +1,5 @@
 'use client';
 
-import Header from '../inspection1/components/Header';
 import { ThemeProvider, useTheme } from './components/ThemeContext';
 
 function InnerLayout({ children }: { children: React.ReactNode }) {
@@ -16,10 +15,6 @@ function InnerLayout({ children }: { children: React.ReactNode }) {
       }}
     >
       {/* FIXED HEADER */}
-      <div style={{ flexShrink: 0 }}>
-        <Header name="Super Admin" role="admin" />
-      </div>
-
       {/* CONTENT AREA — NO SCROLL HERE */}
       <main
         className="flex-1 overflow-hidden" // 🔥 critical change

@@ -8,6 +8,7 @@ const {
   makeConfig,
   setWords,
   stringToWords,
+  uint32ToWords,
   uint64ToWords,
   writeWordsInChunks,
 } = require("./plc-layout");
@@ -17,8 +18,19 @@ const WRITE_COUNT = MODEL_END - AREA_START + 1;
 const DEFAULT_WRITE_INTERVAL_MS = 3000;
 const DEFAULT_ERROR_DELAY_MS = 10000;
 const WRITE_UI_PORT = Number(process.env.PLC_WRITE_UI_PORT || 1012);
-const MODEL_NUMBERS = [6630865, 6630867, 6630862];
+const DEFAULT_WRITE_PLC_PORT = 5012;
+const MODEL_NUMBERS = [0, 6630865, 6630867, 6630862];
 const PLUG_ACTUAL = 14.493;
+const STATUS_VALUES = [0, 1, 2, 3, 4, 5];
+const STATION_WRITE_RANGES = {
+  common: { label: "Common Area", start: 10000, count: 33 },
+  1: { label: "Station 1", start: 10100, count: 37 },
+  2: { label: "Station 2", start: 10200, count: 21 },
+  3: { label: "Station 3", start: 10300, count: 20 },
+  4: { label: "Station 4 Reset", start: 10400, count: 100 },
+  5: { label: "Station 5", start: 10500, count: 12 },
+  6: { label: "Station 6", start: 10600, count: 24 },
+};
 const SPECS = {
   outerDiameter: { min: 34.975, max: 35.025 },
   overallLength: { min: 465.900, max: 466.100 },
@@ -51,18 +63,18 @@ const BOOL_FIELDS = [
     label: `Station 2 / 3 mm Hole ${index + 1}`,
     station: 2,
     offset: index,
-    defaultValue: true,
+    defaultValue: 0,
   })),
-  { key: "holeA", label: "Station 2 / 3 mm Hole A", station: 2, offset: 15, defaultValue: true },
-  { key: "holeB", label: "Station 2 / 3 mm Hole B", station: 2, offset: 16, defaultValue: true },
-  { key: "holeC", label: "Station 2 / 3 mm Hole C", station: 2, offset: 17, defaultValue: true },
-  { key: "special4mm51", label: "Station 2 / Special 4 mm / 51", station: 2, offset: 18, defaultValue: true },
-  { key: "hole12213", label: "Station 2 / 12.2-13", station: 2, offset: 19, defaultValue: true },
-  { key: "slot", label: "Station 2 / Slot", station: 2, offset: 20, defaultValue: true },
-  { key: "marking2d", label: "Station 3 / 2D Marking", station: 3, offset: 0, defaultValue: true },
-  { key: "topEngraving", label: "Station 3 / Top Engraving", station: 3, offset: 1, defaultValue: true },
-  { key: "sideEngraving", label: "Station 3 / Side Engraving", station: 3, offset: 2, defaultValue: true },
-  { key: "presence3d", label: "Station 1 / 3D Presence", station: 1, offset: 30, defaultValue: true },
+  { key: "holeA", label: "Station 2 / 3 mm Hole A", station: 2, offset: 15, defaultValue: 0 },
+  { key: "holeB", label: "Station 2 / 3 mm Hole B", station: 2, offset: 16, defaultValue: 0 },
+  { key: "holeC", label: "Station 2 / 3 mm Hole C", station: 2, offset: 17, defaultValue: 0 },
+  { key: "special4mm51", label: "Station 2 / Special 4 mm / 51", station: 2, offset: 18, defaultValue: 0 },
+  { key: "hole12213", label: "Station 2 / 12.2-13", station: 2, offset: 19, defaultValue: 0 },
+  { key: "slot", label: "Station 2 / Slot", station: 2, offset: 20, defaultValue: 0 },
+  { key: "marking2d", label: "Station 3 / 2D Marking", station: 3, offset: 0, defaultValue: 0 },
+  { key: "topEngraving", label: "Station 3 / Top Engraving", station: 3, offset: 1, defaultValue: 0 },
+  { key: "sideEngraving", label: "Station 3 / Side Engraving", station: 3, offset: 2, defaultValue: 0 },
+  { key: "presence3d", label: "Station 1 / 3D Presence", station: 1, offset: 30, defaultValue: 0 },
 ];
 
 let nextComponentNo = BigInt(process.env.PLC_WRITE_COMPONENT_START || 2000001);
@@ -73,7 +85,7 @@ function randInt(min, max) {
 }
 
 function randBool() {
-  return Math.random() >= 0.2 ? 1 : 0;
+  return Math.random() >= 0.2 ? 4 : 5;
 }
 
 function randFloat(min, max, decimals = 3) {
@@ -90,8 +102,8 @@ function writeCommonArea(area, modelNo) {
 
   setWords(area, 10000, [randInt(1, 3)]);
   setWords(area, 10001, stringToWords(`OP-${randInt(1000, 9999)}`, 10));
-  setWords(area, 10011, [modelNo]);
-  setWords(area, 10012, uint64ToWords(randInt(1000000, 9999999)));
+  setWords(area, 10011, uint32ToWords(modelNo));
+  setWords(area, 10013, uint64ToWords(randInt(1000000, 9999999)));
   setWords(area, 10020, dateTimeToWords(new Date()));
   setWords(area, 10030, [total]);
   setWords(area, 10031, [total - notOk]);
@@ -151,13 +163,22 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function makeWriteConfig() {
+  const config = makeConfig();
+  return {
+    ...config,
+    port: envNumber("PLC_WRITE_PORT", DEFAULT_WRITE_PLC_PORT),
+  };
+}
+
 function toNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
 }
 
-function toBoolWord(value) {
-  return value === true || value === 1 || value === "1" || value === "true" || value === "on" ? 1 : 0;
+function toStatusWord(value) {
+  const status = Number(value);
+  return STATUS_VALUES.includes(status) ? status : 0;
 }
 
 function makeDefaultManualValues() {
@@ -185,6 +206,31 @@ function makeDefaultManualValues() {
   return values;
 }
 
+function makeZeroManualValues() {
+  const values = {
+    shift: 0,
+    operator: "",
+    modelNo: 0,
+    componentNo: "0",
+    autoComponentNo: false,
+    total: 0,
+    ok: 0,
+    notOk: 0,
+    qrVerifierValue: "",
+    floats: {},
+    bools: {},
+  };
+
+  FLOAT_FIELDS.forEach(([key]) => {
+    values.floats[key] = 0;
+  });
+  BOOL_FIELDS.forEach(field => {
+    values.bools[field.key] = 0;
+  });
+
+  return values;
+}
+
 function normalizeManualValues(input = {}) {
   const values = makeDefaultManualValues();
   values.shift = toNumber(input.shift, values.shift);
@@ -205,7 +251,7 @@ function normalizeManualValues(input = {}) {
   BOOL_FIELDS.forEach(field => {
     values.bools[field.key] = input.bools?.[field.key] === undefined
       ? field.defaultValue
-      : Boolean(input.bools[field.key]);
+      : toStatusWord(input.bools[field.key]);
   });
 
   return values;
@@ -214,8 +260,8 @@ function normalizeManualValues(input = {}) {
 function writeCommonAreaFromValues(area, values) {
   setWords(area, 10000, [values.shift]);
   setWords(area, 10001, stringToWords(values.operator, 10));
-  setWords(area, 10011, [values.modelNo]);
-  setWords(area, 10012, uint64ToWords(values.componentNo));
+  setWords(area, 10011, uint32ToWords(values.modelNo));
+  setWords(area, 10013, uint64ToWords(values.componentNo));
   setWords(area, 10020, dateTimeToWords(new Date()));
   setWords(area, 10030, [values.total]);
   setWords(area, 10031, [values.ok]);
@@ -231,7 +277,7 @@ function buildManualInspectionArea(values) {
   });
 
   BOOL_FIELDS.forEach(field => {
-    setWords(area, stationBase(field.station) + field.offset, [toBoolWord(values.bools[field.key])]);
+    setWords(area, stationBase(field.station) + field.offset, [toStatusWord(values.bools[field.key])]);
   });
 
   setWords(area, stationBase(3) + 10, stringToWords(values.qrVerifierValue, 10));
@@ -242,6 +288,26 @@ async function writeManualInspection(config, values, verbose = false) {
   const area = buildManualInspectionArea(values);
   await writeWordsInChunks(config, AREA_START, area, verbose
     ? (chunkStart, count) => console.log(`Writing ${config.device}${chunkStart}-${config.device}${chunkStart + count - 1}`)
+    : undefined
+  );
+}
+
+async function writeManualRange(config, values, rangeKey, verbose = false) {
+  const range = STATION_WRITE_RANGES[rangeKey];
+  if (!range) throw new Error(`Unknown write range ${rangeKey}`);
+  const area = buildManualInspectionArea(values);
+  const offset = range.start - AREA_START;
+  const words = area.slice(offset, offset + range.count);
+  await writeWordsInChunks(config, range.start, words, verbose
+    ? (chunkStart, count) => console.log(`Writing ${config.device}${chunkStart}-${config.device}${chunkStart + count - 1}`)
+    : undefined
+  );
+}
+
+async function resetAllRegisters(config, verbose = false) {
+  const words = Array.from({ length: WRITE_COUNT }, () => 0);
+  await writeWordsInChunks(config, AREA_START, words, verbose
+    ? (chunkStart, count) => console.log(`Resetting ${config.device}${chunkStart}-${config.device}${chunkStart + count - 1}`)
     : undefined
   );
 }
@@ -291,16 +357,24 @@ function renderWriteUi(config) {
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
     label { display: grid; gap: 5px; font-size: 12px; font-weight: 700; color: #34465c; }
     input, select { width: 100%; height: 36px; border: 1px solid #b9c5d4; border-radius: 6px; padding: 0 10px; font-size: 14px; background: #fff; color: #102033; }
-    input[type="checkbox"] { width: 18px; height: 18px; }
-    .check-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; min-height: 34px; padding: 7px 8px; border: 1px solid #d7e0ea; border-radius: 6px; background: #f8fafc; }
+    .check-row { display: grid; grid-template-columns: minmax(0,1fr) 104px; align-items: center; gap: 10px; min-height: 34px; padding: 7px 8px; border: 1px solid #d7e0ea; border-radius: 6px; background: #f8fafc; }
     .check-row span { font-size: 12px; font-weight: 700; color: #34465c; }
     .actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+    .station-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 8px; }
+    .station-actions button { background: #0f4c8a; color: white; }
+    .reset { background: #b91c1c !important; color: white; }
     button { height: 38px; border: 0; border-radius: 7px; padding: 0 14px; font-size: 14px; font-weight: 800; cursor: pointer; }
     #submit { background: #12853c; color: white; }
+    #resetAll { background: #b91c1c; color: white; }
     #randomize { background: #24364c; color: white; }
     #status { font-size: 13px; font-weight: 700; color: #4b5f76; }
     .muted { color: #64748b; font-size: 12px; }
     .span2 { grid-column: 1 / -1; }
+    .status-0 { border-color: #cbd5e1; color: #64748b; }
+    .status-1 { border-color: #2563eb; color: #1d4ed8; }
+    .status-2 { border-color: #f97316; color: #ea580c; }
+    .status-3, .status-5 { border-color: #dc2626; color: #b91c1c; }
+    .status-4 { border-color: #16a34a; color: #15803d; }
     @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -310,7 +384,7 @@ function renderWriteUi(config) {
       <h1>PLC Write Panel</h1>
       <div class="muted">HTTP :${WRITE_UI_PORT} -> PLC ${config.host}:${config.port} / ${config.device}${AREA_START}-${config.device}${MODEL_END}</div>
     </div>
-    <button id="submit" type="button">✓ Submit Write</button>
+    <button id="submit" type="button">Write Common</button>
   </header>
   <main>
     <section>
@@ -319,7 +393,7 @@ function renderWriteUi(config) {
         <label>Model No
           <select id="modelNo"></select>
         </label>
-        <label>Component ID
+        <label>Component No
           <input id="componentNo" inputmode="numeric" pattern="[0-9]*" />
         </label>
         <label class="check-row span2"><span>Auto unique component number after each submit</span><input id="autoComponentNo" type="checkbox" /></label>
@@ -343,8 +417,20 @@ function renderWriteUi(config) {
         </label>
         <div class="actions span2">
           <button id="randomize" type="button">Randomize Actuals</button>
+          <button id="resetAll" type="button">Reset All 0</button>
           <span id="status">Ready</span>
         </div>
+      </div>
+    </section>
+    <section>
+      <h2>Station Wise Write</h2>
+      <div class="body station-actions">
+        <button type="button" data-write-range="1">Write Station 1</button>
+        <button type="button" data-write-range="2">Write Station 2</button>
+        <button type="button" data-write-range="3">Write Station 3</button>
+        <button type="button" data-write-range="4">Reset Station 4</button>
+        <button type="button" data-write-range="5">Write Station 5</button>
+        <button type="button" data-write-range="6">Write Station 6</button>
       </div>
     </section>
     <section>
@@ -367,8 +453,26 @@ function renderWriteUi(config) {
       return Number.isFinite(value) ? value : 0;
     }
 
+    function statusOptions(selected) {
+      const options = [
+        [0, "0 - None"],
+        [1, "1 - Ready"],
+        [2, "2 - Loading"],
+        [3, "3 - Fail"],
+        [4, "4 - Pass"],
+        [5, "5 - Fail"],
+      ];
+      return options.map(([value, label]) => {
+        return '<option value="' + value + '"' + (Number(selected) === value ? " selected" : "") + ">" + label + "</option>";
+      }).join("");
+    }
+
+    function refreshStatusClass(input) {
+      input.className = "status-" + input.value;
+    }
+
     function fillForm() {
-      $("modelNo").innerHTML = meta.models.map(model => '<option value="' + model + '">' + model + '</option>').join("");
+      $("modelNo").innerHTML = meta.models.map(model => '<option value="' + model + '">' + (model === 0 ? "0 - None" : model) + '</option>').join("");
       ["shift", "operator", "componentNo", "total", "ok", "notOk", "qrVerifierValue"].forEach(id => { $(id).value = state[id]; });
       $("modelNo").value = state.modelNo;
       $("autoComponentNo").checked = state.autoComponentNo;
@@ -376,15 +480,20 @@ function renderWriteUi(config) {
         return '<label>' + label + '<input data-float="' + key + '" type="number" step="0.001" value="' + state.floats[key] + '" /><span class="muted">D' + (10000 + ({1:100,2:200,3:300,4:400,5:500,6:600}[station]) + offset + 4) + ' actual</span></label>';
       }).join("");
       $("boolFields").innerHTML = meta.bools.map(field => {
-        return '<label class="check-row"><span>' + field.label + '</span><input data-bool="' + field.key + '" type="checkbox" ' + (state.bools[field.key] ? 'checked' : '') + ' /></label>';
+        const value = Number(state.bools[field.key] || 0);
+        return '<label class="check-row"><span>' + field.label + '</span><select data-bool="' + field.key + '" class="status-' + value + '">' + statusOptions(value) + '</select></label>';
       }).join("");
+      document.querySelectorAll("[data-bool]").forEach(input => {
+        input.addEventListener("change", () => refreshStatusClass(input));
+        refreshStatusClass(input);
+      });
     }
 
     function collectForm() {
       const floats = {};
       const bools = {};
       document.querySelectorAll("[data-float]").forEach(input => floats[input.dataset.float] = Number(input.value));
-      document.querySelectorAll("[data-bool]").forEach(input => bools[input.dataset.bool] = input.checked);
+      document.querySelectorAll("[data-bool]").forEach(input => bools[input.dataset.bool] = Number(input.value));
       return {
         shift: numberValue("shift"),
         operator: $("operator").value,
@@ -422,23 +531,39 @@ function renderWriteUi(config) {
       });
     });
 
-    $("submit").addEventListener("click", async () => {
-      status.textContent = "Writing...";
-      const payload = collectForm();
+    async function postWrite(path, payload, successPrefix) {
+      status.textContent = successPrefix + "...";
       try {
-        const response = await fetch("/api/write", {
+        const response = await fetch(path, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(payload || {}),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.message || "Write failed");
-        state = data.values;
-        fillForm();
-        status.textContent = "Write OK at " + new Date(data.updatedAt).toLocaleTimeString();
+        if (data.values) {
+          state = data.values;
+          fillForm();
+        }
+        status.textContent = successPrefix + " OK at " + new Date(data.updatedAt).toLocaleTimeString();
       } catch (error) {
         status.textContent = error.message;
       }
+    }
+
+    $("submit").addEventListener("click", async () => {
+      await postWrite("/api/write-range/common", collectForm(), "Common write");
+    });
+
+    document.querySelectorAll("[data-write-range]").forEach(button => {
+      button.addEventListener("click", async () => {
+        await postWrite("/api/write-range/" + button.dataset.writeRange, collectForm(), button.textContent);
+      });
+    });
+
+    $("resetAll").addEventListener("click", async () => {
+      if (!confirm("Reset all PLC registers D10000-D10699 to 0?")) return;
+      await postWrite("/api/reset", {}, "Reset all");
     });
 
     fillForm();
@@ -484,11 +609,53 @@ async function handleWriteUiRequest(request, response, config) {
     return;
   }
 
+  const rangeMatch = url.pathname.match(/^\/api\/write-range\/([^/]+)$/);
+  if (request.method === "POST" && rangeMatch) {
+    try {
+      const payload = await readJsonBody(request);
+      const rangeKey = rangeMatch[1];
+      const values = normalizeManualValues(payload);
+      await writeManualRange(config, values, rangeKey, process.argv.includes("--verbose"));
+      lastManualValues = values;
+      if (values.autoComponentNo && rangeKey === "common") {
+        nextComponentNo = BigInt(values.componentNo) + 1n;
+        lastManualValues = { ...values, componentNo: nextComponentNo.toString() };
+      }
+      jsonResponse(response, 200, {
+        ok: true,
+        message: `${STATION_WRITE_RANGES[rangeKey]?.label || rangeKey} write complete`,
+        values: lastManualValues,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      jsonResponse(response, 500, { ok: false, message, updatedAt: new Date().toISOString() });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/reset") {
+    try {
+      await resetAllRegisters(config, process.argv.includes("--verbose"));
+      lastManualValues = makeZeroManualValues();
+      jsonResponse(response, 200, {
+        ok: true,
+        message: `Reset ${config.device}${AREA_START}-${config.device}${MODEL_END} complete`,
+        values: lastManualValues,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      jsonResponse(response, 500, { ok: false, message, updatedAt: new Date().toISOString() });
+    }
+    return;
+  }
+
   jsonResponse(response, 404, { ok: false, message: "Not found" });
 }
 
 function startWriteUiServer() {
-  const config = makeConfig();
+  const config = makeWriteConfig();
   const server = http.createServer((request, response) => {
     handleWriteUiRequest(request, response, config).catch(error => {
       jsonResponse(response, 500, { ok: false, message: error.message });
@@ -502,7 +669,8 @@ function startWriteUiServer() {
 }
 
 function buildRandomInspectionArea() {
-  const modelNo = MODEL_NUMBERS[randInt(0, MODEL_NUMBERS.length - 1)];
+  const runningModels = MODEL_NUMBERS.filter(modelNo => modelNo !== 0);
+  const modelNo = runningModels[randInt(0, runningModels.length - 1)];
   const area = Array.from({ length: WRITE_COUNT }, () => 0);
 
   writeCommonArea(area, modelNo);
@@ -530,7 +698,7 @@ async function writeOnce(config, cycleNo, verbose) {
 }
 
 async function main() {
-  const config = makeConfig();
+  const config = makeWriteConfig();
   const probeOnly = process.argv.includes("--probe");
   const once = process.argv.includes("--once") || probeOnly;
   const verbose = process.argv.includes("--verbose") || probeOnly;

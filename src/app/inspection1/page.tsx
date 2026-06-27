@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useId } from "react";
 import React from "react";
 import type { InspectionApiPayload, PlcPinStatus } from '../../lib/inspectionDataService';
 import { Activity, ArrowRight, CheckCircle2, Gauge, Maximize2, QrCode, ScanLine, X, XCircle } from "lucide-react";
+import Header from "./components/Header";
 import { useTheme } from "./components/ThemeContext";
 /* ═══════════════════════════════════════════════════════════
   DATA
@@ -61,6 +62,7 @@ const stations = [
 ];
 
 const LOADING_MS = 2000;
+const LIVE_REFRESH_MS = 1000;
 
 type Param = {
   name: string; req: number | null; tol: number | null;
@@ -70,11 +72,11 @@ function isPass(req: number | null, tol: number | null, val: number | null): boo
   if (req === null || tol === null || val === null) return null;
   return val >= req - tol && val <= req + tol;
 }
-const empty15PinStatuses = (): PlcPinStatus[] => Array.from({ length: 15 }, () => null);
-const empty3PinStatuses = (): PlcPinStatus[] => Array.from({ length: 3 }, () => null);
-const pinStatusLabel = (status: PlcPinStatus) => status === 4 ? "OK" : status === 5 ? "NG" : status === 2 ? "LOAD" : "-";
-const pinStatusTone = (status: PlcPinStatus, C: T) => status === 4 ? C.ok : status === 5 ? C.ng : status === 2 ? "#f97316" : C.txtMid;
-const pinStatusSoftTone = (status: PlcPinStatus, C: T) => status === 4 ? C.okSoft : status === 5 ? C.ngSoft : status === 2 ? "rgba(249,115,22,0.14)" : C.cellNeutral;
+const empty15PinStatuses = (): PlcPinStatus[] => Array.from({ length: 15 }, () => 0);
+const empty3PinStatuses = (): PlcPinStatus[] => Array.from({ length: 3 }, () => 0);
+const pinStatusLabel = (status: PlcPinStatus) => status === 4 ? "OK" : status === 3 || status === 5 ? "NG" : status === 2 ? "LOAD" : status === 1 ? "READY" : "-";
+const pinStatusTone = (status: PlcPinStatus, C: T) => status === 4 ? C.ok : status === 3 || status === 5 ? C.ng : status === 2 ? "#f97316" : status === 1 ? "#2563eb" : C.txtMid;
+const pinStatusSoftTone = (status: PlcPinStatus, C: T) => status === 4 ? C.okSoft : status === 3 || status === 5 ? C.ngSoft : status === 2 ? "rgba(249,115,22,0.14)" : status === 1 ? "rgba(37,99,235,0.14)" : C.cellNeutral;
 /* ═══════════════════════════════════════════════════════════
   THEME
 ═══════════════════════════════════════════════════════════ */
@@ -939,13 +941,12 @@ function Station02Panel({
   }));
   const specialPins: PinCell[] = [
     { id: "fourMm51", n: 19, status: specialStatuses[0] ?? null, label: "4mm / 51deg", register: "SP1" },
-    { id: "fourHolePositions", n: 20, status: specialStatuses[1] ?? null, label: "4 Hole Positions", register: "SP2" },
-    { id: "slot12213", n: 21, status: specialStatuses[2] ?? null, label: "12.2-13 Slot", register: "SP3" },
+    { id: "slot12213", n: 20, status: specialStatuses[1] ?? null, label: "12.2-13", register: "SP2" },
+    { id: "slot", n: 21, status: specialStatuses[2] ?? null, label: "Slot", register: "SP3" },
   ];
   const allPins = [...pins15, ...pins3, ...specialPins];
   const okCount = allPins.filter(cell => cell.status === 4).length;
-  const ngCount = allPins.filter(cell => cell.status === 5).length;
-  const loadingCount = allPins.filter(cell => cell.status === 2).length;
+  const ngCount = allPins.filter(cell => cell.status === 3 || cell.status === 5).length;
 
   const Cell = ({ cell }: { cell: PinCell }) => {
     const tone = pinStatusTone(cell.status, C);
@@ -1034,76 +1035,108 @@ function Station02Panel({
         accent="#6366f1"
         right={
           <>
-            {loadingCount > 0 && <StatusPill label={`${loadingCount} LOAD`} tone="warn" C={C} />}
             {ngCount > 0 && <StatusPill label={`${ngCount} NG`} tone="ng" C={C} />}
             {okCount > 0 && <StatusPill label={`${okCount} OK`} tone="ok" C={C} />}
           </>
         }
       />
 
+      {/* ---- HEADER ---- */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(0, 2.2fr) minmax(0, 0.9fr) minmax(0, 1.2fr)",
+          gridTemplateColumns: "minmax(0,4.4fr) minmax(104px,1.15fr) minmax(116px,1.25fr)",
+          background: C.panel,
+          borderBottom: `1.5px solid ${C.isDark ? C.brd : "#dfe7f0"}`,
+        }}
+      >
+        {["15 Nos of 3mm Hole", "3 Nos", "Special"].map((label) => (
+          <div
+            key={label}
+            style={{
+              ...MONO,
+              fontSize: fs.sm,
+              fontWeight: 800,
+              textAlign: "center",
+              padding: sp.xs,
+              overflow: "visible",
+              textOverflow: "clip",
+              whiteSpace: "normal",
+              lineHeight: 1.1,
+              color: C.txt,
+            }}
+          >
+            {label}
+          </div>
+        ))}
+      </div>
+
+      {/* ---- BODY ---- */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0,4.4fr) minmax(104px,1.15fr) minmax(116px,1.25fr)",
           gap: sp.xs,
           padding: sp.xs,
           flex: 1,
           alignItems: "stretch",
-          minHeight: 0,
         }}
       >
-        <div style={{ display: "grid", gridTemplateRows: "auto minmax(0,1fr)", gap: sp.xs, minHeight: 0 }}>
-          <Station02GroupTitle C={C}>15 Nos of 3mm Hole</Station02GroupTitle>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gridTemplateRows: "repeat(3, minmax(0, 1fr))", gap: sp.xs, minHeight: 0 }}>
-            {pins15.map((cell) => <Cell key={cell.id} cell={cell} />)}
-          </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(5, 1fr)",
+            gridTemplateRows: "repeat(3, minmax(0, 1fr))",
+            gap: sp.xs,
+            padding: sp.xs,
+            borderRadius: 4,
+          }}
+        >
+          {pins15.map((cell) => (
+            <Cell key={cell.id} cell={cell} />
+          ))}
         </div>
-        <div style={{ display: "grid", gridTemplateRows: "auto repeat(3, minmax(0,1fr))", gap: sp.xs, minHeight: 0 }}>
-          <Station02GroupTitle C={C}>3 Nos of 3mm Hole</Station02GroupTitle>
-          {pins3.map((cell) => <Cell key={cell.id} cell={cell} />)}
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateRows: "repeat(3, minmax(0, 1fr))",
+            gap: sp.xs,
+            padding: sp.xs,
+            borderRadius: 4,
+          }}
+        >
+          {pins3.map((cell) => (
+            <Cell key={cell.id} cell={cell} />
+          ))}
         </div>
-        <div style={{ display: "grid", gridTemplateRows: "auto repeat(3, minmax(0,1fr))", gap: sp.xs, minHeight: 0 }}>
-          <Station02GroupTitle C={C}>Special</Station02GroupTitle>
-          {specialPins.map((cell) => <Cell key={cell.id} cell={cell} />)}
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateRows: "repeat(3, minmax(0, 1fr))",
+            gap: sp.xs,
+            padding: sp.xs,
+            borderRadius: 4,
+          }}
+        >
+          {specialPins.map((cell) => (
+            <Cell key={cell.id} cell={cell} />
+          ))}
         </div>
       </div>
     </div>
   );
 }
-function Station02GroupTitle({ children, C }: { children: React.ReactNode; C: T }) {
-  return (
-    <div
-      style={{
-        ...MONO,
-        fontSize: fs.xs,
-        fontWeight: 900,
-        textAlign: "center",
-        padding: sp.xs,
-        color: C.txt,
-        background: C.hdr,
-        border: `1.5px solid ${C.isDark ? C.brd : "#dfe7f0"}`,
-        borderRadius: 3,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-type Station03Cell = { id: string; name: string; pass: boolean | null; grade?: string | null };
+type Station03Cell = { id: string; name: string; status: PlcPinStatus; grade?: string | null };
 type Station3Data = NonNullable<InspectionApiPayload["station3"]>;
-
-function plcStatusToPass(status: PlcPinStatus): boolean | null {
-  if (status === 4) return true;
-  if (status === 5) return false;
-  return null;
-}
 
 function Station03Panel({ station3, C }: { station3: Station3Data | null; C: T }) {
   const cols: Station03Cell[] = [
-    { id: "laser2dMarking", name: "2D Marking", pass: plcStatusToPass(station3?.marking2d ?? null) },
-    { id: "laserTopEngraving", name: "Top Engraving", pass: plcStatusToPass(station3?.topEngraving ?? null) },
-    { id: "laserSideEngraving", name: "Side Engraving", pass: plcStatusToPass(station3?.sideEngraving ?? null) },
-    { id: "laserVerifier", name: "Verifier", pass: station3?.qrVerifierValue ? true : null, grade: station3?.qrGrade ?? station3?.qrVerifierValue ?? null },
+    { id: "laser2dMarking", name: "2D Marking", status: station3?.marking2d ?? 0 },
+    { id: "laserTopEngraving", name: "Top Engraving", status: station3?.topEngraving ?? 0 },
+    { id: "laserSideEngraving", name: "Side Engraving", status: station3?.sideEngraving ?? 0 },
+    { id: "laserVerifier", name: "Verifier", status: station3?.qrVerifierValue ? 4 : 0, grade: station3?.qrGrade ?? station3?.qrVerifierValue ?? null },
   ];
 
   return (
@@ -1149,7 +1182,7 @@ function Station03Panel({ station3, C }: { station3: Station3Data | null; C: T }
               display: "flex",
               flexDirection: "column",
               ...sideBorders(`1.5px solid ${C.brd}`),
-              borderTop: `3px solid ${col.pass === null ? C.txtDim : col.grade ? "#0f4c8a" : col.pass ? C.ok : C.ng}`,
+              borderTop: `3px solid ${col.grade ? "#0f4c8a" : pinStatusTone(col.status, C)}`,
               borderRadius: 3,
               overflow: "hidden",
               minHeight: "clamp(86px,9vh,116px)",
@@ -1212,7 +1245,7 @@ function Station03Panel({ station3, C }: { station3: Station3Data | null; C: T }
                       textAlign: "center",
                     }}
                   >
-                    QR | GRADE {col.grade}
+                    {col.grade}
                   </span>
                 </>
               ) : (
@@ -1225,15 +1258,15 @@ function Station03Panel({ station3, C }: { station3: Station3Data | null; C: T }
                     minWidth: 50,
                     borderRadius: 3,
                     padding: "7px 12px",
-                    background: col.pass === null ? C.cellNeutral : col.pass ? C.okSoft : C.ngSoft,
-                    border: `1px solid ${col.pass === null ? C.txtDim : col.pass ? C.ok : C.ng}`,
+                    background: pinStatusSoftTone(col.status, C),
+                    border: `1px solid ${pinStatusTone(col.status, C)}`,
                     fontSize: "clamp(13px,1.05vw,18px)",
                     fontWeight: 900,
-                    color: col.pass === null ? C.txtDim : col.pass ? C.ok : C.ng,
+                    color: pinStatusTone(col.status, C),
                     lineHeight: 1,
                   }}
                 >
-                  {col.pass === null ? "-" : col.pass ? "OK" : "NG"}
+                  {pinStatusLabel(col.status)}
                 </span>
               )}
             </div>
@@ -1999,7 +2032,7 @@ function Inspection1Dashboard() {
     };
 
     refresh();
-    const iv = setInterval(refresh, 5000);
+    const iv = setInterval(refresh, LIVE_REFRESH_MS);
     return () => {
       alive = false;
       clearInterval(iv);
@@ -2029,6 +2062,20 @@ function Inspection1Dashboard() {
   };
 
   return (
+    <div style={{
+      flex: 1,
+      display: "flex",
+      flexDirection: "column",
+      width: "100%",
+      height: "100%",
+      minWidth: 0,
+      minHeight: 0,
+      overflow: "hidden",
+      background: C.bg,
+      color: C.txt,
+      fontFamily: "'Montserrat', sans-serif",
+    }}>
+      <Header name="Super Admin" role="admin" />
     <div style={{
       flex: 1,
       display: "flex",
@@ -2193,6 +2240,7 @@ function Inspection1Dashboard() {
           <Station456Panel actuals={actuals} C={rightC} />
         </div>
       </div>
+    </div>
     </div>
   );
 }

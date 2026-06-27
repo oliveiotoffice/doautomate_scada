@@ -6,6 +6,8 @@ import { useState, useEffect } from 'react';
 import type { InspectionApiPayload, InspectionRtc } from '../../../lib/inspectionDataService';
 import { useTheme } from './ThemeContext';
 
+const LIVE_REFRESH_MS = 1000;
+
 interface HeaderProps {
   name: string;
   role: string;
@@ -50,7 +52,7 @@ function liveDataFromPayload(payload: InspectionApiPayload): HeaderLiveData {
   return {
     shift: payload.common?.shift ?? '--',
     operator,
-    shaftId: payload.header.shaftNumber && payload.header.shaftNumber !== '-' ? payload.header.shaftNumber : componentNo,
+    shaftId: componentNo,
     modelNo: payload.common?.modelNo || payload.modelNo || '--',
     time: fallbackClock.time,
     date: fallbackClock.date,
@@ -90,7 +92,7 @@ export default function Header({ name, role, shiftNumber = 1, operatorName }: He
     };
 
     refresh();
-    const id = setInterval(refresh, 5000);
+    const id = setInterval(refresh, LIVE_REFRESH_MS);
     return () => {
       alive = false;
       clearInterval(id);
@@ -344,14 +346,6 @@ export default function Header({ name, role, shiftNumber = 1, operatorName }: He
 
         {/* Shift + Operator */}
         <div className="hdr-info-group">
-          <div className="hdr-pill">
-            <div className="hdr-pill-label">Shaft ID</div>
-            <div className="hdr-pill-value accent">{liveData.shaftId}</div>
-          </div> <div className="hdr-vdivider" />
-          <div className="hdr-pill">
-            <div className="hdr-pill-label">Model</div>
-            <div className="hdr-pill-value">{liveData.modelNo}</div>
-          </div> <div className="hdr-vdivider" />
           <div className="hdr-pill">
             <div className="hdr-pill-label">Shift</div>
             <div className="hdr-pill-value accent">#{liveData.shift}</div>

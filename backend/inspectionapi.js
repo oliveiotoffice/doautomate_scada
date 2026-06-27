@@ -8,14 +8,18 @@ const {
   wordsToDateTime,
   wordsToFloat,
   wordsToString,
+  wordsToUInt32,
   wordsToUInt64,
 } = require("./plc-layout");
 
 const PORT = Number(process.env.INSPECTION_BACKEND_PORT || 4000);
 const MODEL_END = 10699;
 const READ_COUNT = MODEL_END - AREA_START + 1;
-const POLL_MS = Number(process.env.PLC_POLL_MS || process.env.MC_POLL_MS || 3000);
+const POLL_MS = Number(process.env.PLC_POLL_MS || process.env.MC_POLL_MS || 1000);
 const ERROR_DELAY_MS = Number(process.env.PLC_ERROR_DELAY_MS || 10000);
+const READ_CHUNK_SIZE = Number(process.env.PLC_READ_CHUNK_SIZE || process.env.MC_READ_CHUNK_SIZE || 50);
+const READ_CHUNK_DELAY_MS = Number(process.env.PLC_READ_CHUNK_DELAY_MS || process.env.MC_READ_CHUNK_DELAY_MS || 20);
+const READ_TIMEOUT_MS = Number(process.env.PLC_READ_TIMEOUT_MS || process.env.MC_READ_TIMEOUT_MS || 2500);
 const MODEL_NAMES = {
   6630865: "Shaft-6630865",
   6630867: "Shaft-6630867",
@@ -24,15 +28,23 @@ const MODEL_NAMES = {
 let cache = makeDisconnectedPayload("PLC polling not started");
 let polling = false;
 
+function makeReadConfig() {
+  const config = makeConfig();
+  return {
+    ...config,
+    chunkSize: READ_CHUNK_SIZE,
+    chunkDelayMs: READ_CHUNK_DELAY_MS,
+    timeoutMs: READ_TIMEOUT_MS,
+  };
+}
+
 function stationBase(stationNo) {
   return AREA_START + STATION_OFFSETS[stationNo];
 }
 
 function boolStatus(value) {
-  if (value === 1 || value === 4) return 4;
-  if (value === 0 || value === 5) return 5;
-  if (value === 2) return 2;
-  return null;
+  const status = Number(value);
+  return [0, 1, 2, 3, 4, 5].includes(status) ? status : 0;
 }
 
 function readBool(area, address) {
@@ -63,8 +75,8 @@ function decodeCommon(area) {
   return {
     shift: getWords(area, 10000, 1)[0],
     operator: wordsToString(getWords(area, 10001, 10)),
-    modelNo: getWords(area, 10011, 1)[0],
-    componentNo: wordsToUInt64(getWords(area, 10012, 4)),
+    modelNo: wordsToUInt32(...getWords(area, 10011, 2)),
+    componentNo: wordsToUInt64(getWords(area, 10013, 4)),
     rtc: wordsToDateTime(getWords(area, 10020, 10)),
     total: getWords(area, 10030, 1)[0],
     ok: getWords(area, 10031, 1)[0],
@@ -121,8 +133,8 @@ function numberActual(reading) {
 function makePayload(area, config) {
   const common = decodeCommon(area);
   const decoded = decodeUniversal(area);
-  const modelNo = String(common.modelNo || "");
-  const modelNumber = MODEL_NAMES[common.modelNo] || (modelNo ? `Shaft-${modelNo}` : "-");
+  const modelNo = String(common.modelNo ?? 0);
+  const modelNumber = common.modelNo === 0 ? "-" : MODEL_NAMES[common.modelNo] || (modelNo ? `Shaft-${modelNo}` : "-");
   const componentNo = common.componentNo ? String(common.componentNo) : "-";
 
   return {
@@ -162,6 +174,21 @@ function makePayload(area, config) {
       holes3: decoded.station2.holes3,
       special: decoded.station2.special,
     },
+    statusRegisters: {
+      station1: {
+        presence3d: decoded.station1.presence3d,
+      },
+      station2: {
+        holes15: decoded.station2.holes15,
+        holes3: decoded.station2.holes3,
+        special: decoded.station2.special,
+      },
+      station3: {
+        marking2d: decoded.station3.marking2d,
+        topEngraving: decoded.station3.topEngraving,
+        sideEngraving: decoded.station3.sideEngraving,
+      },
+    },
     station3: {
       marking2d: decoded.station3.marking2d,
       topEngraving: decoded.station3.topEngraving,
@@ -173,8 +200,8 @@ function makePayload(area, config) {
       common: {
         shift: "D10000",
         operator: "D10001-D10010",
-        modelNo: "D10011",
-        componentNo: "D10012-D10015",
+        modelNo: "D10011-D10012",
+        componentNo: "D10013-D10016",
         rtc: "D10020-D10029",
         total: "D10030",
         ok: "D10031",
@@ -230,18 +257,33 @@ function makeDisconnectedPayload(message) {
       modelNumber: "-",
     },
     componentNo: "-",
-    modelNo: "",
+    modelNo: "0",
     modelNumber: "-",
     actuals: {},
     pinStatuses: {
-      holes15: Array.from({ length: 15 }, () => null),
-      holes3: Array.from({ length: 3 }, () => null),
-      special: Array.from({ length: 3 }, () => null),
+      holes15: Array.from({ length: 15 }, () => 0),
+      holes3: Array.from({ length: 3 }, () => 0),
+      special: Array.from({ length: 3 }, () => 0),
+    },
+    statusRegisters: {
+      station1: {
+        presence3d: 0,
+      },
+      station2: {
+        holes15: Array.from({ length: 15 }, () => 0),
+        holes3: Array.from({ length: 3 }, () => 0),
+        special: Array.from({ length: 3 }, () => 0),
+      },
+      station3: {
+        marking2d: 0,
+        topEngraving: 0,
+        sideEngraving: 0,
+      },
     },
     station3: {
-      marking2d: null,
-      topEngraving: null,
-      sideEngraving: null,
+      marking2d: 0,
+      topEngraving: 0,
+      sideEngraving: 0,
       qrVerifierValue: "",
       qrGrade: null,
     },
@@ -267,7 +309,7 @@ async function pollPlc() {
   polling = true;
 
   try {
-    const config = makeConfig();
+    const config = makeReadConfig();
     const words = await readWordsInChunks(config, AREA_START, READ_COUNT);
     cache = makePayload(words, config);
     console.log(`[${new Date().toISOString()}] PLC read ok model=${cache.modelNo || "-"} total=${cache.summary.total} ok=${cache.summary.ok} ng=${cache.summary.ng}`);
@@ -314,5 +356,6 @@ const server = http.createServer((request, response) => {
 server.listen(PORT, () => {
   console.log(`Inspection API listening on http://localhost:${PORT}`);
   console.log(`Reading universal PLC layout D10000-D10699 every ${POLL_MS}ms`);
+  console.log(`PLC read chunk size ${READ_CHUNK_SIZE}, chunk delay ${READ_CHUNK_DELAY_MS}ms, timeout ${READ_TIMEOUT_MS}ms`);
   pollPlc().finally(() => schedulePoll(POLL_MS));
 });
