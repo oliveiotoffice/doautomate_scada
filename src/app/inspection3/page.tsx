@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import React from "react";
-import type { InspectionApiPayload, PlcPinStatus } from '../../lib/inspectionDataService';
+import { getInspectionStationProgress, type InspectionApiPayload, type PlcPinStatus } from '../../lib/inspectionDataService';
 import { Activity, ArrowRight, CheckCircle2, Gauge, Maximize2, QrCode, ScanLine, X, XCircle } from "lucide-react";
 import Header from "./components/Header";
 import { useTheme } from "./components/ThemeContext";
@@ -193,6 +193,45 @@ const sideBorders = (border: string): Pick<React.CSSProperties, "borderRight" | 
   borderLeft: border,
 });
 
+function ThemeToggle({ dark, onToggle, C }: { dark: boolean; onToggle: () => void; C: T }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
+      title={dark ? "Light theme" : "Dark theme"}
+      style={{
+        display: "flex", alignItems: "center", gap: sp.xs,
+        padding: `${sp.xs} ${sp.sm}`,
+        background: dark ? "rgba(255,255,255,0.07)" : "rgba(15,23,42,0.06)",
+        border: `1px solid ${C.brd}`,
+        borderRadius: 20,
+        cursor: "pointer",
+        transition: "background 0.2s, border-color 0.2s",
+        flexShrink: 0,
+      }}
+    >
+      <span style={{
+        width: "clamp(22px,1.6vw,28px)", height: "clamp(12px,0.9vw,16px)", borderRadius: 10,
+        background: dark ? C.accent : C.txtDim,
+        position: "relative", transition: "background 0.25s", flexShrink: 0,
+      }}>
+        <span style={{
+          position: "absolute", top: "20%",
+          left: dark ? "52%" : "10%",
+          width: "42%", height: "60%", borderRadius: "50%",
+          background: "#ffffff",
+          transition: "left 0.25s cubic-bezier(.34,1.56,.64,1)",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+        }} />
+      </span>
+      <span style={{ ...MONO, fontSize: fs.xs, fontWeight: 800, letterSpacing: "0.12em", color: C.txtMid, userSelect: "none" }}>
+        {dark ? "LIGHT" : "DARK"}
+      </span>
+    </button>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════
   LIVE CLOCK
 ═══════════════════════════════════════════════════════════ */
@@ -298,12 +337,11 @@ function StatusCards({ total, okCount, ngCount, C }: {
 ═══════════════════════════════════════════════════════════ */
 function StationStrip({
   activeId, completedIds, loadingId,
-  onClick, hoveredStation, onHover, C
+  hoveredStation, onHover, C
 }: {
   activeId: number;
   completedIds: number[];
   loadingId: number | null;
-  onClick: (id: number) => void;
   hoveredStation: number | null;
   onHover: (id: number | null) => void;
   C: T;
@@ -324,11 +362,11 @@ function StationStrip({
     >
       {stations.map((st, i) => {
         const done = completedIds.includes(st.id);
-        const active = st.id === activeId;
-        const hovered = hoveredStation === st.id;
+        const loading = loadingId === st.id && !done;
+        const active = st.id === activeId && !done;
+        const hovered = hoveredStation === st.id && !done;
 
         const col = done ? C.ok : active ? st.color : hovered ? st.color : C.txtDim;
-        const canClick = active && !loadingId;
 
         return (
           <div
@@ -342,9 +380,8 @@ function StationStrip({
           >
             {/* STATION */}
             <div
-              onClick={() => { if (canClick) onClick(st.id); }}
-              onMouseEnter={() => onHover(st.id)}
-              onMouseLeave={() => onHover(null)}
+              onMouseEnter={() => { if (!done) onHover(st.id); }}
+              onMouseLeave={() => { if (!done) onHover(null); }}
               style={{
                 flex: "1 1 0",
                 display: "flex",
@@ -353,12 +390,13 @@ function StationStrip({
                 justifyContent: "center",
                 gap: sp.xs,
                 padding: `${sp.lg} clamp(4px,0.5vw,9px)`,
-                background: active ? C.panel : hovered ? C.card : "transparent",
-                cursor: canClick ? "pointer" : "default",
+                background: done ? (C.isDark ? "rgba(34,197,94,0.10)" : C.okSoft) : active ? C.panel : hovered ? C.card : "transparent",
+                cursor: "default",
                 borderRadius: 3,
-                border: active ? `1px solid ${C.accent}` : "1px solid transparent",
+                border: done ? `1px solid ${C.ok}` : active ? `1px solid ${C.accent}` : "1px solid transparent",
                 minWidth: 0,
                 minHeight: "clamp(68px, 7.8vh, 94px)",
+                opacity: done ? 0.86 : 1,
               }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: sp.xs, minWidth: 0, maxWidth: "100%" }}>
@@ -402,6 +440,9 @@ function StationStrip({
               }}>
                 {st.name}
               </span>
+              <div style={{ width: "78%", height: 2, opacity: loading ? 1 : 0, transition: "opacity 0.2s ease" }}>
+                <ProgressBar loading={loading} C={C} />
+              </div>
             </div>
 
             {/* ARROW */}
@@ -1916,7 +1957,7 @@ function SvgCard({
   ROOT
 ═══════════════════════════════════════════════════════════ */
 export default function Dashboard() {
-  const { theme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
   const dark = theme.mode === "dark";
   const C = makeTheme(dark);
   const rightC: T = dark ? C : {
@@ -1977,11 +2018,6 @@ export default function Dashboard() {
   const [ngCount, setNgCount] = useState(0);
   const [hoveredStation, setHoveredStation] = useState<number | null>(null);
   const [fullscreenView, setFullscreenView] = useState<"front" | "bottom" | null>(null);
-  const stationIds = stations.map(s => s.id);
-  const nextId = (id: number) => {
-    const idx = stationIds.indexOf(id);
-    return idx < stationIds.length - 1 ? stationIds[idx + 1] : id;
-  };
 
   useEffect(() => {
     let alive = true;
@@ -2001,6 +2037,10 @@ export default function Dashboard() {
         setSmallPinStatuses(communicating ? data.pinStatuses?.holes3 ?? empty3PinStatuses() : empty3PinStatuses());
         setSpecialStatuses(communicating ? data.pinStatuses?.special ?? empty3PinStatuses() : empty3PinStatuses());
         setStation3(communicating ? data.station3 ?? null : null);
+        const progress = getInspectionStationProgress(communicating ? data : null);
+        setActiveId(progress.activeId);
+        setCompletedIds(progress.completedIds);
+        setLoadingId(progress.loadingId);
         setTotal(data.summary.total);
         setOkCount(data.summary.ok);
         setNgCount(data.summary.ng);
@@ -2010,6 +2050,9 @@ export default function Dashboard() {
         setSmallPinStatuses(empty3PinStatuses());
         setSpecialStatuses(empty3PinStatuses());
         setStation3(null);
+        setActiveId(1);
+        setCompletedIds([]);
+        setLoadingId(null);
       }
     };
 
@@ -2029,16 +2072,6 @@ export default function Dashboard() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [fullscreenView]);
-
-  const handleClick = (id: number) => {
-    if (id !== activeId || loadingId) return;
-    setLoadingId(id);
-    setTimeout(() => {
-      setCompletedIds(prev => prev.includes(id) ? prev : [...prev, id]);
-      setActiveId(nextId(id));
-      setLoadingId(null);
-    }, LOADING_MS);
-  };
 
   return (
     <div style={{
@@ -2098,6 +2131,7 @@ export default function Dashboard() {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
+                gap: sp.sm,
                 fontSize: "clamp(9px,0.58vw,12px)",
                 fontWeight: 800,
                 letterSpacing: "0.1em",
@@ -2115,6 +2149,7 @@ export default function Dashboard() {
                 <span style={{ color: C.txtMid }}>Model No :</span>
                 <span id="modelNumber" style={{ color: C.accent }}>{inspectionData?.header.modelNumber ?? "--"}</span>
               </div>
+              {/* <ThemeToggle dark={dark} onToggle={toggleTheme} C={C} /> */}
             </div>
           </div>
 
@@ -2182,7 +2217,6 @@ export default function Dashboard() {
             activeId={activeId}
             completedIds={completedIds}
             loadingId={loadingId}
-            onClick={handleClick}
             hoveredStation={hoveredStation}
             onHover={setHoveredStation}
             C={rightC}

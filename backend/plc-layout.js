@@ -2,7 +2,7 @@ const net = require("net");
 
 const DEFAULTS = {
   host: "192.168.3.39",
-  port: 5011,
+  port: 5014,
   device: "D",
   networkNo: 0x00,
   pcNo: 0xff,

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useId } from "react";
 import React from "react";
-import type { InspectionApiPayload, PlcPinStatus } from '../../lib/inspectionDataService';
+import { getInspectionStationProgress, type InspectionApiPayload, type PlcPinStatus } from '../../lib/inspectionDataService';
 import { Activity, ArrowRight, CheckCircle2, Gauge, Maximize2, QrCode, ScanLine, X, XCircle } from "lucide-react";
 import Header from "./components/Header";
 import { useTheme } from "./components/ThemeContext";
@@ -378,12 +378,11 @@ function StatusCards({ total, okCount, ngCount, C }: {
 ═══════════════════════════════════════════════════════════ */
 function StationStrip({
   activeId, completedIds, loadingId,
-  onClick, hoveredStation, onHover, C
+  hoveredStation, onHover, C
 }: {
   activeId: number;
   completedIds: number[];
   loadingId: number | null;
-  onClick: (id: number) => void;
   hoveredStation: number | null;
   onHover: (id: number | null) => void;
   C: T;
@@ -404,11 +403,11 @@ function StationStrip({
     >
       {stations.map((st, i) => {
         const done = completedIds.includes(st.id);
-        const active = st.id === activeId;
-        const hovered = hoveredStation === st.id;
+        const loading = loadingId === st.id && !done;
+        const active = st.id === activeId && !done;
+        const hovered = hoveredStation === st.id && !done;
 
         const col = done ? C.ok : active ? st.color : hovered ? st.color : C.txtDim;
-        const canClick = active && !loadingId;
 
         return (
           <div
@@ -422,9 +421,8 @@ function StationStrip({
           >
             {/* STATION */}
             <div
-              onClick={() => { if (canClick) onClick(st.id); }}
-              onMouseEnter={() => onHover(st.id)}
-              onMouseLeave={() => onHover(null)}
+              onMouseEnter={() => { if (!done) onHover(st.id); }}
+              onMouseLeave={() => { if (!done) onHover(null); }}
               style={{
                 flex: "1 1 0",
                 display: "flex",
@@ -433,12 +431,13 @@ function StationStrip({
                 justifyContent: "center",
                 gap: sp.xs,
                 padding: `${sp.lg} clamp(4px,0.5vw,9px)`,
-                background: active ? C.panel : hovered ? C.card : "transparent",
-                cursor: canClick ? "pointer" : "default",
+                background: done ? (C.isDark ? "rgba(34,197,94,0.10)" : C.okSoft) : active ? C.panel : hovered ? C.card : "transparent",
+                cursor: "default",
                 borderRadius: 3,
-                border: active ? `1px solid ${C.accent}` : "1px solid transparent",
+                border: done ? `1px solid ${C.ok}` : active ? `1px solid ${C.accent}` : "1px solid transparent",
                 minWidth: 0,
                 minHeight: "clamp(68px, 7.8vh, 94px)",
+                opacity: done ? 0.86 : 1,
               }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: sp.xs, minWidth: 0, maxWidth: "100%" }}>
@@ -482,6 +481,9 @@ function StationStrip({
               }}>
                 {st.name}
               </span>
+              <div style={{ width: "78%", height: 2, opacity: loading ? 1 : 0, transition: "opacity 0.2s ease" }}>
+                <ProgressBar loading={loading} C={C} />
+              </div>
             </div>
 
             {/* ARROW */}
@@ -1992,11 +1994,6 @@ function Inspection1Dashboard() {
   const [station3, setStation3] = useState<Station3Data | null>(null);
   const [hoveredStation, setHoveredStation] = useState<number | null>(null);
   const [fullscreenView, setFullscreenView] = useState<"front" | "bottom" | null>(null);
-  const stationIds = stations.map(s => s.id);
-  const nextId = (id: number) => {
-    const idx = stationIds.indexOf(id);
-    return idx < stationIds.length - 1 ? stationIds[idx + 1] : id;
-  };
 
   useEffect(() => {
     let alive = true;
@@ -2016,6 +2013,10 @@ function Inspection1Dashboard() {
         setSmallPinStatuses(communicating ? data.pinStatuses?.holes3 ?? empty3PinStatuses() : empty3PinStatuses());
         setSpecialStatuses(communicating ? data.pinStatuses?.special ?? empty3PinStatuses() : empty3PinStatuses());
         setStation3(communicating ? data.station3 ?? null : null);
+        const progress = getInspectionStationProgress(communicating ? data : null);
+        setActiveId(progress.activeId);
+        setCompletedIds(progress.completedIds);
+        setLoadingId(progress.loadingId);
         setTotal(communicating ? data.summary.total : null);
         setOkCount(communicating ? data.summary.ok : null);
         setNgCount(communicating ? data.summary.ng : null);
@@ -2025,6 +2026,9 @@ function Inspection1Dashboard() {
         setSmallPinStatuses(empty3PinStatuses());
         setSpecialStatuses(empty3PinStatuses());
         setStation3(null);
+        setActiveId(1);
+        setCompletedIds([]);
+        setLoadingId(null);
         setTotal(null);
         setOkCount(null);
         setNgCount(null);
@@ -2050,16 +2054,6 @@ function Inspection1Dashboard() {
 
   const plcCommunicating = inspectionData?.source.connected === true;
   const plcAlarmMessage = inspectionData?.source.message;
-
-  const handleClick = (id: number) => {
-    if (id !== activeId || loadingId) return;
-    setLoadingId(id);
-    setTimeout(() => {
-      setCompletedIds(prev => prev.includes(id) ? prev : [...prev, id]);
-      setActiveId(nextId(id));
-      setLoadingId(null);
-    }, LOADING_MS);
-  };
 
   return (
     <div style={{
@@ -2129,6 +2123,7 @@ function Inspection1Dashboard() {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
+                gap: sp.sm,
                 fontSize: "clamp(9px,0.58vw,12px)",
                 fontWeight: 800,
                 letterSpacing: "0.1em",
@@ -2146,6 +2141,7 @@ function Inspection1Dashboard() {
                 <span style={{ color: C.txtMid }}>Model No :</span>
                 <span id="modelNumber" style={{ color: C.accent }}>{inspectionData?.modelNo ?? "--"}</span>
               </div>
+              {/* <ThemeToggle dark={dark} onToggle={toggleTheme} C={C} /> */}
             </div>
           </div>
 
@@ -2215,7 +2211,6 @@ function Inspection1Dashboard() {
             activeId={activeId}
             completedIds={completedIds}
             loadingId={loadingId}
-            onClick={handleClick}
             hoveredStation={hoveredStation}
             onHover={setHoveredStation}
             C={rightC}

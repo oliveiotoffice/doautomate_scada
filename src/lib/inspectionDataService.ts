@@ -77,6 +77,12 @@ export type InspectionApiPayload = {
   };
 };
 
+export type InspectionStationProgress = {
+  activeId: number;
+  completedIds: number[];
+  loadingId: number | null;
+};
+
 const CURRENT_MODEL_NO: InspectionModelNo = "6630865";
 const NONE_MODEL_NO: InspectionModelNo = "0";
 const PIN_COUNT = 15;
@@ -90,6 +96,55 @@ const EMPTY_HEADER: InspectionHeader = {
   componentNo: "-",
   modelNumber: "-",
 };
+
+function hasActualValue(values: Record<number, number | null> | undefined) {
+  return Boolean(values && Object.values(values).some(value => typeof value === "number" && Number.isFinite(value) && value !== 0));
+}
+
+function hasLoadingStatus(statuses: Array<PlcPinStatus | undefined>) {
+  return statuses.some(status => status === 2);
+}
+
+function hasFinalStatus(statuses: Array<PlcPinStatus | undefined>) {
+  return statuses.some(status => status === 3 || status === 4 || status === 5);
+}
+
+function firstIncompleteStation(completedIds: number[]) {
+  return [1, 2, 3, 4, 5, 6].find(id => !completedIds.includes(id)) ?? 6;
+}
+
+export function getInspectionStationProgress(payload: InspectionApiPayload | null | undefined): InspectionStationProgress {
+  if (!payload?.source.connected) return { activeId: 1, completedIds: [], loadingId: null };
+
+  const station1Statuses = [payload.statusRegisters?.station1?.presence3d];
+  const station2Statuses = [
+    ...(payload.pinStatuses.holes15 ?? []),
+    ...(payload.pinStatuses.holes3 ?? []),
+    ...(payload.pinStatuses.special ?? []),
+  ];
+  const station3Statuses = [
+    payload.station3?.marking2d,
+    payload.station3?.topEngraving,
+    payload.station3?.sideEngraving,
+  ];
+
+  const completedIds: number[] = [];
+  if (hasActualValue(payload.actuals[1]) || hasFinalStatus(station1Statuses)) completedIds.push(1);
+  if (hasFinalStatus(station2Statuses)) completedIds.push(2);
+  if (hasFinalStatus(station3Statuses) || Boolean(payload.station3?.qrVerifierValue)) completedIds.push(3);
+  if (completedIds.includes(3) && (hasActualValue(payload.actuals[5]) || hasActualValue(payload.actuals[6]))) completedIds.push(4);
+  if (hasActualValue(payload.actuals[5])) completedIds.push(5);
+  if (hasActualValue(payload.actuals[6])) completedIds.push(6);
+
+  const rawLoadingId =
+    hasLoadingStatus(station1Statuses) ? 1 :
+    hasLoadingStatus(station2Statuses) ? 2 :
+    hasLoadingStatus(station3Statuses) ? 3 :
+    null;
+  const loadingId = rawLoadingId !== null && !completedIds.includes(rawLoadingId) ? rawLoadingId : null;
+
+  return { activeId: loadingId ?? firstIncompleteStation(completedIds), completedIds, loadingId };
+}
 
 function normalizeBackendUrl() {
   return (process.env.INSPECTION_BACKEND_URL || DEFAULT_BACKEND_URL).replace(/\/+$/, "");
