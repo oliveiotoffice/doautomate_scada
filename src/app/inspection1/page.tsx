@@ -663,8 +663,8 @@ function ValCell({
           {value ?? "—"}
         </span>
         {unit && (
-          <span style={{ ...MONO, flexShrink: 0, background: "transparent", fontSize: "clamp(8px, min(4.3cqw, 1.05dvh), 12px)", fontWeight: 900, color: C.txtMid, lineHeight: 1, textTransform: "uppercase", whiteSpace: "nowrap", marginTop: 2 }}>
-            {unit}
+          <span style={{ ...MONO, flexShrink: 0, background: "transparent", fontSize: "clamp(8px, min(4.3cqw, 1.05dvh), 12px)", fontWeight: 900, color: C.txtMid, lineHeight: 1, whiteSpace: "nowrap", marginTop: 2 }}>
+            {unit.toLowerCase()}
           </span>
         )}
       </div>

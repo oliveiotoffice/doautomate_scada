@@ -206,24 +206,26 @@ const sideBorders = (border: string): Pick<React.CSSProperties, "borderRight" | 
   LIVE CLOCK
 ═══════════════════════════════════════════════════════════ */
 function LiveClock({ C }: { C: T }) {
-  const [t, setT] = useState(new Date());
+  const [t, setT] = useState<Date | null>(null);
   useEffect(() => {
-    const iv = setInterval(() => setT(new Date()), 1000);
+    const tick = () => setT(new Date());
+    tick();
+    const iv = setInterval(tick, 1000);
     return () => clearInterval(iv);
   }, []);
   const z = (n: number) => String(n).padStart(2, "0");
   return (
     <div style={{ ...MONO, fontSize: fs.sm, fontWeight: 700, color: C.txt, letterSpacing: "0.1em", userSelect: "none" }}>
-      {z(t.getHours())}<span style={{ animation: "colon-blink 1s step-end infinite" }}>:</span>
-      {z(t.getMinutes())}<span style={{ animation: "colon-blink 1s step-end infinite" }}>:</span>
-      {z(t.getSeconds())}
+      {t ? (
+        <>
+          {z(t.getHours())}<span style={{ animation: "colon-blink 1s step-end infinite" }}>:</span>
+          {z(t.getMinutes())}<span style={{ animation: "colon-blink 1s step-end infinite" }}>:</span>
+          {z(t.getSeconds())}
+        </>
+      ) : "--:--:--"}
     </div>
   );
 }
-
-/* ═══════════════════════════════════════════════════════════
-  PROGRESS BAR
-═══════════════════════════════════════════════════════════ */
 function ProgressBar({ loading, C }: { loading: boolean; C: T }) {
   const [w, setW] = useState(100);
   const raf = useRef<number | null>(null);
@@ -585,8 +587,8 @@ function ValCell({
           {value ?? "—"}
         </span>
         {unit && (
-          <span style={{ ...MONO, flexShrink: 0, background: "transparent", fontSize: "clamp(8px, min(4.3cqw, 1.05dvh), 12px)", fontWeight: 900, color: C.txtMid, lineHeight: 1, textTransform: "uppercase", whiteSpace: "nowrap", marginTop: 2 }}>
-            {unit}
+          <span style={{ ...MONO, flexShrink: 0, background: "transparent", fontSize: "clamp(8px, min(4.3cqw, 1.05dvh), 12px)", fontWeight: 900, color: C.txtMid, lineHeight: 1, whiteSpace: "nowrap", marginTop: 2 }}>
+            {unit.toLowerCase()}
           </span>
         )}
       </div>
