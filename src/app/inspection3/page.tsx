@@ -2,17 +2,10 @@
 
 import { useState, useEffect, useRef } from "react";
 import React from "react";
-import type { InspectionApiPayload } from '../../lib/inspectionDataService';
+import { getInspectionStationProgress, type InspectionApiPayload, type PlcPinStatus } from '../../lib/inspectionDataService';
 import { Activity, ArrowRight, CheckCircle2, Gauge, Maximize2, QrCode, ScanLine, X, XCircle } from "lucide-react";
+import Header from "./components/Header";
 import { useTheme } from "./components/ThemeContext";
-import { useRouter } from "next/navigation";
-
-const CURRENT_MODEL_NO = "6630862";
-const MODEL_ROUTES: Record<string, string> = {
-  "6630865": "/inspection1",
-  "6630867": "/inspection2",
-  "6630862": "/inspection3",
-};
 /* ═══════════════════════════════════════════════════════════
   DATA
 ═══════════════════════════════════════════════════════════ */
@@ -69,6 +62,7 @@ const stations = [
 ];
 
 const LOADING_MS = 2000;
+const LIVE_REFRESH_MS = 1000;
 
 type Param = {
   name: string; req: number | null; tol: number | null;
@@ -78,9 +72,11 @@ function isPass(req: number | null, tol: number | null, val: number | null): boo
   if (req === null || tol === null || val === null) return true;
   return val >= req - tol && val <= req + tol;
 }
-function genPins(count: number, seed: number): boolean[] {
-  return Array.from({ length: count }, (_, i) => ((seed * 31 + i * 17 + count * 7) % 100) > 12);
-}
+const empty15PinStatuses = (): PlcPinStatus[] => Array.from({ length: 15 }, () => 0);
+const empty3PinStatuses = (): PlcPinStatus[] => Array.from({ length: 3 }, () => 0);
+const pinStatusLabel = (status: PlcPinStatus) => status === 4 ? "OK" : status === 3 || status === 5 ? "NG" : status === 2 ? "LOAD" : status === 1 ? "READY" : "-";
+const pinStatusTone = (status: PlcPinStatus, C: T) => status === 4 ? C.ok : status === 3 || status === 5 ? C.ng : status === 2 ? "#f97316" : status === 1 ? "#2563eb" : C.txtMid;
+const pinStatusSoftTone = (status: PlcPinStatus, C: T) => status === 4 ? C.okSoft : status === 3 || status === 5 ? C.ngSoft : status === 2 ? "rgba(249,115,22,0.14)" : status === 1 ? "rgba(37,99,235,0.14)" : C.cellNeutral;
 
 /* ═══════════════════════════════════════════════════════════
   THEME
@@ -197,6 +193,45 @@ const sideBorders = (border: string): Pick<React.CSSProperties, "borderRight" | 
   borderLeft: border,
 });
 
+function ThemeToggle({ dark, onToggle, C }: { dark: boolean; onToggle: () => void; C: T }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
+      title={dark ? "Light theme" : "Dark theme"}
+      style={{
+        display: "flex", alignItems: "center", gap: sp.xs,
+        padding: `${sp.xs} ${sp.sm}`,
+        background: dark ? "rgba(255,255,255,0.07)" : "rgba(15,23,42,0.06)",
+        border: `1px solid ${C.brd}`,
+        borderRadius: 20,
+        cursor: "pointer",
+        transition: "background 0.2s, border-color 0.2s",
+        flexShrink: 0,
+      }}
+    >
+      <span style={{
+        width: "clamp(22px,1.6vw,28px)", height: "clamp(12px,0.9vw,16px)", borderRadius: 10,
+        background: dark ? C.accent : C.txtDim,
+        position: "relative", transition: "background 0.25s", flexShrink: 0,
+      }}>
+        <span style={{
+          position: "absolute", top: "20%",
+          left: dark ? "52%" : "10%",
+          width: "42%", height: "60%", borderRadius: "50%",
+          background: "#ffffff",
+          transition: "left 0.25s cubic-bezier(.34,1.56,.64,1)",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+        }} />
+      </span>
+      <span style={{ ...MONO, fontSize: fs.xs, fontWeight: 800, letterSpacing: "0.12em", color: C.txtMid, userSelect: "none" }}>
+        {dark ? "LIGHT" : "DARK"}
+      </span>
+    </button>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════
   LIVE CLOCK
 ═══════════════════════════════════════════════════════════ */
@@ -304,12 +339,11 @@ function StatusCards({ total, okCount, ngCount, C }: {
 ═══════════════════════════════════════════════════════════ */
 function StationStrip({
   activeId, completedIds, loadingId,
-  onClick, hoveredStation, onHover, C
+  hoveredStation, onHover, C
 }: {
   activeId: number;
   completedIds: number[];
   loadingId: number | null;
-  onClick: (id: number) => void;
   hoveredStation: number | null;
   onHover: (id: number | null) => void;
   C: T;
@@ -330,11 +364,11 @@ function StationStrip({
     >
       {stations.map((st, i) => {
         const done = completedIds.includes(st.id);
-        const active = st.id === activeId;
-        const hovered = hoveredStation === st.id;
+        const loading = loadingId === st.id && !done;
+        const active = st.id === activeId && !done;
+        const hovered = hoveredStation === st.id && !done;
 
         const col = done ? C.ok : active ? st.color : hovered ? st.color : C.txtDim;
-        const canClick = active && !loadingId;
 
         return (
           <div
@@ -348,9 +382,8 @@ function StationStrip({
           >
             {/* STATION */}
             <div
-              onClick={() => { if (canClick) onClick(st.id); }}
-              onMouseEnter={() => onHover(st.id)}
-              onMouseLeave={() => onHover(null)}
+              onMouseEnter={() => { if (!done) onHover(st.id); }}
+              onMouseLeave={() => { if (!done) onHover(null); }}
               style={{
                 flex: "1 1 0",
                 display: "flex",
@@ -359,12 +392,13 @@ function StationStrip({
                 justifyContent: "center",
                 gap: sp.xs,
                 padding: `${sp.lg} clamp(4px,0.5vw,9px)`,
-                background: active ? C.panel : hovered ? C.card : "transparent",
-                cursor: canClick ? "pointer" : "default",
+                background: done ? (C.isDark ? "rgba(34,197,94,0.10)" : C.okSoft) : active ? C.panel : hovered ? C.card : "transparent",
+                cursor: "default",
                 borderRadius: 3,
-                border: active ? `1px solid ${C.accent}` : "1px solid transparent",
+                border: done ? `1px solid ${C.ok}` : active ? `1px solid ${C.accent}` : "1px solid transparent",
                 minWidth: 0,
                 minHeight: "clamp(68px, 7.8vh, 94px)",
+                opacity: done ? 0.86 : 1,
               }}
             >
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: sp.xs, minWidth: 0, maxWidth: "100%" }}>
@@ -408,6 +442,9 @@ function StationStrip({
               }}>
                 {st.name}
               </span>
+              <div style={{ width: "78%", height: 2, opacity: loading ? 1 : 0, transition: "opacity 0.2s ease" }}>
+                <ProgressBar loading={loading} C={C} />
+              </div>
             </div>
 
             {/* ARROW */}
@@ -828,36 +865,48 @@ function Station01Panel({
 /* ═══════════════════════════════════════════════════════════
   STATION 02 — pin matrix layout
 ═══════════════════════════════════════════════════════════ */
-function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
-  type PinCell = { n: number; pass: boolean; label: string };
+function Station02Panel({
+  pinStatuses,
+  smallPinStatuses,
+  specialStatuses,
+  C,
+}: {
+  pinStatuses: PlcPinStatus[];
+  smallPinStatuses: PlcPinStatus[];
+  specialStatuses: PlcPinStatus[];
+  C: T;
+}) {
+  type PinCell = { n: number; status?: PlcPinStatus; pass?: boolean; label: string };
 
-  const first6 = genPins(6, pinSeed);
-  const second6 = genPins(6, pinSeed + 50);
-  const fourMm51 = genPins(1, pinSeed + 100)[0];
-  const slot12213 = genPins(1, pinSeed + 200)[0];
-
-  // ---- SPLIT DATA ----
-  const col1: PinCell[] = first6.map((p, i) => ({
+  const col1: PinCell[] = Array.from({ length: 15 }, (_, i) => ({
     n: i + 1,
-    pass: p,
+    status: pinStatuses[i] ?? null,
     label: String(i + 1).padStart(2, "0"),
   }));
 
-  const col2: PinCell[] = second6.map((p, i) => ({
-    n: i + 7,
-    pass: p,
-    label: String(i + 7).padStart(2, "0"),
+  const col2: PinCell[] = Array.from({ length: 3 }, (_, i) => ({
+    n: i + 16,
+    status: smallPinStatuses[i] ?? null,
+    label: `Hole ${String.fromCharCode(65 + i)}`,
   }));
 
+  const fourMm51 = specialStatuses[0] === 4;
+  const slot12213 = specialStatuses[1] === 4;
+  const genPins = () => [specialStatuses[2] === 4];
   const col3: PinCell[] = [
     { n: 13, pass: fourMm51, label: "4mm / 51°" },
     { n: 14, pass: slot12213, label: "12.2–13" },
-    { n: 15, pass: genPins(1, pinSeed + 300)[0], label: "Slot" },
+    { n: 21, status: specialStatuses[2] ?? null, label: "Slot" },
   ];
 
+  col3[0] = { n: 19, status: specialStatuses[0] ?? null, label: "4mm / 51deg" };
+  col3[1] = { n: 20, status: specialStatuses[1] ?? null, label: "12.2-13" };
+  col3[2] = { n: 21, status: specialStatuses[2] ?? null, label: "Slot" };
+
   const allPins = [...col1, ...col2, ...col3];
-  const okCount = allPins.filter((cell) => cell.pass).length;
-  const ngCount = allPins.length - okCount;
+  const cellStatus = (cell: PinCell): PlcPinStatus => cell.status ?? (cell.pass === true ? 4 : cell.pass === false ? 5 : 0);
+  const okCount = allPins.filter((cell) => cellStatus(cell) === 4).length;
+  const ngCount = allPins.filter((cell) => cellStatus(cell) === 5).length;
 
   const Cell = ({ cell }: { cell: PinCell }) => (
     <div
@@ -869,13 +918,15 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
         ...sideBorders(
           `1.5px solid ${
             C.isDark
-              ? cell.pass
+              ? cellStatus(cell) === 4
                 ? "rgba(34,197,94,0.48)"
-                : "rgba(239,68,68,0.54)"
+                : cellStatus(cell) === 5
+                  ? "rgba(239,68,68,0.54)"
+                  : C.brd
               : C.brd
           }`
         ),
-        borderTop: `3px solid ${cell.pass ? C.ok : C.ng}`,
+        borderTop: `3px solid ${pinStatusTone(cellStatus(cell), C)}`,
         borderRadius: 3,
         padding: `clamp(6px,0.62vh,10px) clamp(8px,0.64vw,13px)`,
         minHeight: "clamp(44px,5.2vh,62px)",
@@ -891,7 +942,7 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
           ...MONO,
           fontSize: fs.sm,
           fontWeight: 900,
-          color: cell.pass ? C.ok : C.ng,
+          color: pinStatusTone(cellStatus(cell), C),
           lineHeight: 1.05,
           whiteSpace: "normal",
           overflowWrap: "anywhere",
@@ -910,16 +961,16 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
           minWidth: 38,
           borderRadius: 3,
           padding: "4px 7px",
-          background: cell.pass ? C.okSoft : C.ngSoft,
-          border: `1px solid ${cell.pass ? C.ok : C.ng}`,
+          background: pinStatusSoftTone(cellStatus(cell), C),
+          border: `1px solid ${pinStatusTone(cellStatus(cell), C)}`,
           fontSize: "clamp(9px, min(0.75vw, 1.25vh), 12px)",
           fontWeight: 900,
-          color: cell.pass ? C.ok : C.ng,
+          color: pinStatusTone(cellStatus(cell), C),
           lineHeight: 1,
           textAlign: "center",
         }}
       >
-        {cell.pass ? "OK" : "NG"}
+        {pinStatusLabel(cellStatus(cell))}
       </span>
     </div>
   );
@@ -960,12 +1011,12 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(0,2fr) minmax(0,2fr) minmax(120px,1fr)",
+          gridTemplateColumns: "minmax(0,3fr) minmax(0,1.15fr) minmax(120px,1fr)",
           background: C.panel,
           borderBottom: `1.5px solid ${C.isDark ? C.brd : "#dfe7f0"}`,
         }}
       >
-        {["3mm 6 Holes", "3mm 6  6 Holes", "Special"].map((label) => (
+        {["3mm Holes 1-15", "Holes A/B/C", "Special"].map((label) => (
           <div
             key={label}
             style={{
@@ -988,7 +1039,7 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(0,2fr) minmax(0,2fr) minmax(120px,1fr)",
+          gridTemplateColumns: "minmax(0,3fr) minmax(0,1.15fr) minmax(120px,1fr)",
           gap: sp.xs,
           padding: sp.xs,
           flex: 1,
@@ -1000,7 +1051,7 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
             gridTemplateRows: "repeat(3, minmax(0, 1fr))",
             gap: sp.xs,
             padding: sp.xs,
@@ -1017,7 +1068,7 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gridTemplateColumns: "1fr",
             gridTemplateRows: "repeat(3, minmax(0, 1fr))",
             gap: sp.xs,
             padding: sp.xs,
@@ -1058,13 +1109,18 @@ function Station02Panel({ pinSeed, C }: { pinSeed: number; C: T }) {
 ═══════════════════════════════════════════════════════════ */
 
 
-function Station03Panel({ C }: { C: T }) {
-  const cols = [
-    { name: "2D Marking", pass: true },
-    { name: "Top Engraving", pass: true },
-    { name: "Side Engraving", pass: true },
-    { name: "Verifier", pass: true, grade: "A" },
+type Station3Data = NonNullable<InspectionApiPayload["station3"]>;
+type Station03Cell = { name: string; status: PlcPinStatus; grade?: string | null };
+
+function Station03Panel({ station3, C }: { station3: Station3Data | null; C: T }) {
+  const cols: Station03Cell[] = [
+    { name: "2D Marking", status: station3?.marking2d ?? 0 },
+    { name: "Top Engraving", status: station3?.topEngraving ?? 0 },
+    { name: "Side Engraving", status: station3?.sideEngraving ?? 0 },
+    { name: "Verifier", status: station3?.qrVerifierValue ? 4 : 0, grade: station3?.qrGrade ?? station3?.qrVerifierValue ?? null },
   ];
+  const knownResults = cols.filter(col => col.status !== 0 || col.grade);
+  const allOk = knownResults.length > 0 && knownResults.every(col => col.status === 4 || Boolean(col.grade));
 
   return (
     <div
@@ -1086,7 +1142,7 @@ function Station03Panel({ C }: { C: T }) {
         name="LASER MARKING"
         C={C}
         accent="#0ea5e9"
-        right={<StatusPill label="ALL OK" tone="ok" C={C} />}
+        right={allOk ? <StatusPill label="ALL OK" tone="ok" C={C} /> : null}
       />
 
       {/* 4-column grid */}
@@ -1108,7 +1164,7 @@ function Station03Panel({ C }: { C: T }) {
               display: "flex",
               flexDirection: "column",
               ...sideBorders(`1.5px solid ${C.brd}`),
-              borderTop: `3px solid ${col.grade ? "#0f4c8a" : C.ok}`,
+              borderTop: `3px solid ${col.grade ? "#0f4c8a" : pinStatusTone(col.status, C)}`,
               borderRadius: 3,
               overflow: "hidden",
               minHeight: "clamp(86px,9vh,116px)",
@@ -1171,7 +1227,7 @@ function Station03Panel({ C }: { C: T }) {
                       textAlign: "center",
                     }}
                   >
-                    QR | GRADE {col.grade}
+                     {col.grade}
                   </span>
                 </>
               ) : (
@@ -1184,15 +1240,15 @@ function Station03Panel({ C }: { C: T }) {
                     minWidth: 50,
                     borderRadius: 3,
                     padding: "7px 12px",
-                    background: col.pass ? C.okSoft : C.ngSoft,
-                    border: `1px solid ${col.pass ? C.ok : C.ng}`,
+                    background: pinStatusSoftTone(col.status, C),
+                    border: `1px solid ${pinStatusTone(col.status, C)}`,
                     fontSize: "clamp(13px,1.05vw,18px)",
                     fontWeight: 900,
-                    color: col.pass ? C.ok : C.ng,
+                    color: pinStatusTone(col.status, C),
                     lineHeight: 1,
                   }}
                 >
-                  {col.pass ? "OK" : "NG"}
+                  {pinStatusLabel(col.status)}
                 </span>
               )}
             </div>
@@ -1903,7 +1959,7 @@ function SvgCard({
   ROOT
 ═══════════════════════════════════════════════════════════ */
 export default function Dashboard() {
-  const { theme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
   const dark = theme.mode === "dark";
   const C = makeTheme(dark);
   const rightC: T = dark ? C : {
@@ -1955,55 +2011,60 @@ export default function Dashboard() {
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [inspectionData, setInspectionData] = useState<InspectionApiPayload | null>(null);
   const [actuals, setActuals] = useState<Record<number, Record<number, number | null>>>({});
-  const [pinSeed, setPinSeed] = useState(42);
+  const [pinStatuses, setPinStatuses] = useState<PlcPinStatus[]>(() => empty15PinStatuses());
+  const [smallPinStatuses, setSmallPinStatuses] = useState<PlcPinStatus[]>(() => empty3PinStatuses());
+  const [specialStatuses, setSpecialStatuses] = useState<PlcPinStatus[]>(() => empty3PinStatuses());
+  const [station3, setStation3] = useState<Station3Data | null>(null);
   const [total, setTotal] = useState(0);
   const [okCount, setOkCount] = useState(0);
   const [ngCount, setNgCount] = useState(0);
   const [hoveredStation, setHoveredStation] = useState<number | null>(null);
   const [fullscreenView, setFullscreenView] = useState<"front" | "bottom" | null>(null);
-  const router = useRouter();
-
-  const stationIds = stations.map(s => s.id);
-  const nextId = (id: number) => {
-    const idx = stationIds.indexOf(id);
-    return idx < stationIds.length - 1 ? stationIds[idx + 1] : id;
-  };
 
   useEffect(() => {
     let alive = true;
 
     const refresh = async () => {
       try {
-        const response = await fetch(`/api/inspection/current?modelNo=${encodeURIComponent(CURRENT_MODEL_NO)}`, { cache: "no-store" });
+        const response = await fetch(`/api/inspection/current`, { cache: "no-store" });
         if (!response.ok) throw new Error("Inspection API request failed");
 
         const data: InspectionApiPayload = await response.json();
         if (!alive) return;
 
-        const activeRoute = MODEL_ROUTES[data.modelNo];
-        if (activeRoute && data.modelNo !== CURRENT_MODEL_NO) {
-          router.replace(activeRoute);
-          return;
-        }
-
         setActuals(data.actuals);
         setInspectionData(data);
+        const communicating = data.source.connected;
+        setPinStatuses(communicating ? data.pinStatuses?.holes15 ?? empty15PinStatuses() : empty15PinStatuses());
+        setSmallPinStatuses(communicating ? data.pinStatuses?.holes3 ?? empty3PinStatuses() : empty3PinStatuses());
+        setSpecialStatuses(communicating ? data.pinStatuses?.special ?? empty3PinStatuses() : empty3PinStatuses());
+        setStation3(communicating ? data.station3 ?? null : null);
+        const progress = getInspectionStationProgress(communicating ? data : null);
+        setActiveId(progress.activeId);
+        setCompletedIds(progress.completedIds);
+        setLoadingId(progress.loadingId);
         setTotal(data.summary.total);
         setOkCount(data.summary.ok);
         setNgCount(data.summary.ng);
-        setPinSeed(s => s + 1);
       } catch (error) {
         console.error("Inspection data refresh failed:", error);
+        setPinStatuses(empty15PinStatuses());
+        setSmallPinStatuses(empty3PinStatuses());
+        setSpecialStatuses(empty3PinStatuses());
+        setStation3(null);
+        setActiveId(1);
+        setCompletedIds([]);
+        setLoadingId(null);
       }
     };
 
     refresh();
-    const iv = setInterval(refresh, 1800);
+    const iv = setInterval(refresh, LIVE_REFRESH_MS);
     return () => {
       alive = false;
       clearInterval(iv);
     };
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     if (!fullscreenView) return;
@@ -2014,17 +2075,21 @@ export default function Dashboard() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [fullscreenView]);
 
-  const handleClick = (id: number) => {
-    if (id !== activeId || loadingId) return;
-    setLoadingId(id);
-    setTimeout(() => {
-      setCompletedIds(prev => prev.includes(id) ? prev : [...prev, id]);
-      setActiveId(nextId(id));
-      setLoadingId(null);
-    }, LOADING_MS);
-  };
-
   return (
+    <div style={{
+      flex: 1,
+      display: "flex",
+      flexDirection: "column",
+      width: "100%",
+      height: "100%",
+      minWidth: 0,
+      minHeight: 0,
+      overflow: "hidden",
+      background: C.bg,
+      color: C.txt,
+      fontFamily: "'Montserrat', sans-serif",
+    }}>
+      <Header name="Super Admin" role="admin" />
     <div style={{
       flex: 1,
       display: "flex",
@@ -2068,6 +2133,7 @@ export default function Dashboard() {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
+                gap: sp.sm,
                 fontSize: "clamp(9px,0.58vw,12px)",
                 fontWeight: 800,
                 letterSpacing: "0.1em",
@@ -2085,6 +2151,7 @@ export default function Dashboard() {
                 <span style={{ color: C.txtMid }}>Model No :</span>
                 <span id="modelNumber" style={{ color: C.accent }}>{inspectionData?.header.modelNumber ?? "--"}</span>
               </div>
+              {/* <ThemeToggle dark={dark} onToggle={toggleTheme} C={C} /> */}
             </div>
           </div>
 
@@ -2152,7 +2219,6 @@ export default function Dashboard() {
             activeId={activeId}
             completedIds={completedIds}
             loadingId={loadingId}
-            onClick={handleClick}
             hoveredStation={hoveredStation}
             onHover={setHoveredStation}
             C={rightC}
@@ -2172,11 +2238,12 @@ export default function Dashboard() {
           }}
         >
           <Station01Panel actuals={actuals[1] ?? {}} C={rightC} />
-          <Station02Panel pinSeed={pinSeed} C={rightC} />
-          <Station03Panel C={rightC} />
+          <Station02Panel pinStatuses={pinStatuses} smallPinStatuses={smallPinStatuses} specialStatuses={specialStatuses} C={rightC} />
+          <Station03Panel station3={station3} C={rightC} />
           <Station456Panel actuals={actuals} C={rightC} />
         </div>
       </div>
+    </div>
     </div>
   );
 }

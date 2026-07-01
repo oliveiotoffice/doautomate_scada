@@ -3,7 +3,10 @@
 import { Moon, Sun } from 'lucide-react';
 import Image from 'next/image';
 import { useState, useEffect } from 'react';
+import type { InspectionApiPayload, InspectionRtc } from '../../../lib/inspectionDataService';
 import { useTheme } from './ThemeContext';
+
+const LIVE_REFRESH_MS = 1000;
 
 interface HeaderProps {
   name: string;
@@ -12,28 +15,88 @@ interface HeaderProps {
   operatorName?: string | number;
 }
 
+type HeaderLiveData = {
+  shift: string | number;
+  operator: string;
+  shaftId: string;
+  modelNo: string;
+  time: string;
+  date: string;
+};
+
+function formatRtc(rtc?: InspectionRtc | null) {
+  if (!rtc) return null;
+  const date = new Date(rtc.year, rtc.month - 1, rtc.day, rtc.hour, rtc.minute, rtc.second);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return {
+    time: date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
+    date: date.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }),
+  };
+}
+
+function formatLocalClock() {
+  const now = new Date();
+  return {
+    time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
+    date: now.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }),
+  };
+}
+
+function liveDataFromPayload(payload: InspectionApiPayload): HeaderLiveData {
+  const rtc = formatRtc(payload.common?.rtc);
+  const fallbackClock = rtc ?? formatLocalClock();
+  const componentNo = payload.common?.componentNo || payload.header.componentNo || payload.componentNo || '--';
+  const operator = payload.common?.operator || payload.header.operatorId || '--';
+
+  return {
+    shift: payload.common?.shift ?? '--',
+    operator,
+    shaftId: componentNo,
+    modelNo: payload.common?.modelNo || payload.modelNo || '--',
+    time: fallbackClock.time,
+    date: fallbackClock.date,
+  };
+}
+
 export default function Header({ name, role, shiftNumber = 1, operatorName }: HeaderProps) {
   const { theme, toggleTheme } = useTheme();
-  const [currentTime, setCurrentTime] = useState('');
-  const [currentDate, setCurrentDate] = useState('');
+  const [liveData, setLiveData] = useState<HeaderLiveData>(() => {
+    const clock = formatLocalClock();
+    return {
+      shift: shiftNumber,
+      operator: String(operatorName ?? name),
+      shaftId: '--',
+      modelNo: '--',
+      time: clock.time,
+      date: clock.date,
+    };
+  });
 
   const t = theme;
-  const displayOperator = operatorName ?? name;
 
-  // Live clock
   useEffect(() => {
-    const tick = () => {
-      const now = new Date();
-      setCurrentTime(
-        now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
-      );
-      setCurrentDate(
-        now.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
-      );
+    let alive = true;
+
+    const refresh = async () => {
+      try {
+        const response = await fetch('/api/inspection/current', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Inspection API request failed');
+        const payload: InspectionApiPayload = await response.json();
+        if (alive) setLiveData(liveDataFromPayload(payload));
+      } catch {
+        if (!alive) return;
+        const clock = formatLocalClock();
+        setLiveData(previous => ({ ...previous, time: clock.time, date: clock.date }));
+      }
     };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
+
+    refresh();
+    const id = setInterval(refresh, LIVE_REFRESH_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
   }, []);
 
   return (
@@ -285,11 +348,11 @@ export default function Header({ name, role, shiftNumber = 1, operatorName }: He
         <div className="hdr-info-group">
           <div className="hdr-pill">
             <div className="hdr-pill-label">Shift</div>
-            <div className="hdr-pill-value accent">#{shiftNumber}</div>
+            <div className="hdr-pill-value accent">#{liveData.shift}</div>
           </div> <div className="hdr-vdivider" /> 
           <div className="hdr-pill">
             <div className="hdr-pill-label">Operator</div>
-            <div className="hdr-pill-value" title={role}>{displayOperator}</div>
+            <div className="hdr-pill-value" title={role}>{liveData.operator}</div>
           </div>
         </div>
 
@@ -297,8 +360,8 @@ export default function Header({ name, role, shiftNumber = 1, operatorName }: He
 
         {/* Live datetime */}
         <div className="hdr-datetime-block">
-          <div className="hdr-time">{currentTime}</div>
-          <div className="hdr-date">{currentDate}</div>
+          <div className="hdr-time">{liveData.time}</div>
+          <div className="hdr-date">{liveData.date}</div>
         </div>
 
         <div className="hdr-vdivider" />

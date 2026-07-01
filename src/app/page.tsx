@@ -1,5 +1,5 @@
-import InspectionDashboard from "./inspection1/page";
+import InspectionModelSwitch from "./InspectionModelSwitch";
 
 export default function Home() {
-  return <InspectionDashboard />;
+  return <InspectionModelSwitch />;
 }

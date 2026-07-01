@@ -1,7 +1,7 @@
 export type InspectionValueMap = Record<number, Record<number, number | null>>;
 
 export type InspectionModelNo = string;
-export type PlcPinStatus = 2 | 4 | 5 | null;
+export type PlcPinStatus = 0 | 1 | 2 | 3 | 4 | 5 | null;
 
 export type InspectionHeader = {
   shaftNumber: string;
@@ -10,8 +10,29 @@ export type InspectionHeader = {
   modelNumber: string;
 };
 
+export type InspectionRtc = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  millisecond?: number;
+  dayOfWeek?: number;
+  epochSeconds?: number | string;
+};
+
+export type InspectionCommon = {
+  shift: number | string;
+  operator: string;
+  modelNo: InspectionModelNo;
+  componentNo: string;
+  rtc?: InspectionRtc | null;
+};
+
 export type InspectionApiPayload = {
   header: InspectionHeader;
+  common?: InspectionCommon;
   componentNo: string;
   modelNo: InspectionModelNo;
   modelNumber: string;
@@ -20,6 +41,21 @@ export type InspectionApiPayload = {
     holes15: PlcPinStatus[];
     holes3?: PlcPinStatus[];
     special?: PlcPinStatus[];
+  };
+  statusRegisters?: {
+    station1?: {
+      presence3d?: PlcPinStatus;
+    };
+    station2?: {
+      holes15?: PlcPinStatus[];
+      holes3?: PlcPinStatus[];
+      special?: PlcPinStatus[];
+    };
+    station3?: {
+      marking2d?: PlcPinStatus;
+      topEngraving?: PlcPinStatus;
+      sideEngraving?: PlcPinStatus;
+    };
   };
   station3?: {
     marking2d: PlcPinStatus;
@@ -41,12 +77,19 @@ export type InspectionApiPayload = {
   };
 };
 
+export type InspectionStationProgress = {
+  activeId: number;
+  completedIds: number[];
+  loadingId: number | null;
+};
+
 const CURRENT_MODEL_NO: InspectionModelNo = "6630865";
+const NONE_MODEL_NO: InspectionModelNo = "0";
 const PIN_COUNT = 15;
 const SMALL_PIN_COUNT = 3;
 const DEFAULT_BACKEND_URL = "http://localhost:4000";
-const EMPTY_PIN_STATUSES: PlcPinStatus[] = Array.from({ length: PIN_COUNT }, () => null);
-const EMPTY_SMALL_PIN_STATUSES: PlcPinStatus[] = Array.from({ length: SMALL_PIN_COUNT }, () => null);
+const EMPTY_PIN_STATUSES: PlcPinStatus[] = Array.from({ length: PIN_COUNT }, () => 0);
+const EMPTY_SMALL_PIN_STATUSES: PlcPinStatus[] = Array.from({ length: SMALL_PIN_COUNT }, () => 0);
 const EMPTY_HEADER: InspectionHeader = {
   shaftNumber: "-",
   operatorId: "-",
@@ -54,13 +97,62 @@ const EMPTY_HEADER: InspectionHeader = {
   modelNumber: "-",
 };
 
+function hasActualValue(values: Record<number, number | null> | undefined) {
+  return Boolean(values && Object.values(values).some(value => typeof value === "number" && Number.isFinite(value) && value !== 0));
+}
+
+function hasLoadingStatus(statuses: Array<PlcPinStatus | undefined>) {
+  return statuses.some(status => status === 2);
+}
+
+function hasFinalStatus(statuses: Array<PlcPinStatus | undefined>) {
+  return statuses.some(status => status === 3 || status === 4 || status === 5);
+}
+
+function firstIncompleteStation(completedIds: number[]) {
+  return [1, 2, 3, 4, 5, 6].find(id => !completedIds.includes(id)) ?? 6;
+}
+
+export function getInspectionStationProgress(payload: InspectionApiPayload | null | undefined): InspectionStationProgress {
+  if (!payload?.source.connected) return { activeId: 1, completedIds: [], loadingId: null };
+
+  const station1Statuses = [payload.statusRegisters?.station1?.presence3d];
+  const station2Statuses = [
+    ...(payload.pinStatuses.holes15 ?? []),
+    ...(payload.pinStatuses.holes3 ?? []),
+    ...(payload.pinStatuses.special ?? []),
+  ];
+  const station3Statuses = [
+    payload.station3?.marking2d,
+    payload.station3?.topEngraving,
+    payload.station3?.sideEngraving,
+  ];
+
+  const completedIds: number[] = [];
+  if (hasActualValue(payload.actuals[1]) || hasFinalStatus(station1Statuses)) completedIds.push(1);
+  if (hasFinalStatus(station2Statuses)) completedIds.push(2);
+  if (hasFinalStatus(station3Statuses) || Boolean(payload.station3?.qrVerifierValue)) completedIds.push(3);
+  if (completedIds.includes(3) && (hasActualValue(payload.actuals[5]) || hasActualValue(payload.actuals[6]))) completedIds.push(4);
+  if (hasActualValue(payload.actuals[5])) completedIds.push(5);
+  if (hasActualValue(payload.actuals[6])) completedIds.push(6);
+
+  const rawLoadingId =
+    hasLoadingStatus(station1Statuses) ? 1 :
+    hasLoadingStatus(station2Statuses) ? 2 :
+    hasLoadingStatus(station3Statuses) ? 3 :
+    null;
+  const loadingId = rawLoadingId !== null && !completedIds.includes(rawLoadingId) ? rawLoadingId : null;
+
+  return { activeId: loadingId ?? firstIncompleteStation(completedIds), completedIds, loadingId };
+}
+
 function normalizeBackendUrl() {
   return (process.env.INSPECTION_BACKEND_URL || DEFAULT_BACKEND_URL).replace(/\/+$/, "");
 }
 
 function normalizeStatus(value: unknown): PlcPinStatus {
   const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-  if (numeric === 2 || numeric === 4 || numeric === 5) return numeric;
+  if (numeric === 0 || numeric === 1 || numeric === 2 || numeric === 3 || numeric === 4 || numeric === 5) return numeric;
   return null;
 }
 
@@ -124,11 +216,11 @@ function normalizeHeader(payload: unknown): InspectionHeader {
 }
 
 function summarizePins(statuses: PlcPinStatus[]) {
-  const completed = statuses.filter(status => status !== null).length;
+  const completed = statuses.filter(status => status !== null && status !== 0).length;
   return {
     total: completed,
     ok: statuses.filter(status => status === 4).length,
-    ng: statuses.filter(status => status === 5).length,
+    ng: statuses.filter(status => status === 3 || status === 5).length,
   };
 }
 
@@ -150,9 +242,9 @@ function mockActual(base: number, offset: number, decimals = 3) {
 
 function boolSummary(statuses: PlcPinStatus[]) {
   return {
-    total: statuses.filter(status => status !== null).length,
+    total: statuses.filter(status => status !== null && status !== 0).length,
     ok: statuses.filter(status => status === 4).length,
-    ng: statuses.filter(status => status === 5).length,
+    ng: statuses.filter(status => status === 3 || status === 5).length,
   };
 }
 
@@ -222,6 +314,20 @@ function makeMockInspectionData(modelNo: InspectionModelNo): InspectionApiPayloa
       componentNo: `Co-${modelNo}`,
       modelNumber: `Shaft-${modelNo}`,
     },
+    common: {
+      shift: 1,
+      operator: "MOCK-OP",
+      modelNo,
+      componentNo: `Co-${modelNo}`,
+      rtc: {
+        year: new Date().getFullYear(),
+        month: new Date().getMonth() + 1,
+        day: new Date().getDate(),
+        hour: new Date().getHours(),
+        minute: new Date().getMinutes(),
+        second: new Date().getSeconds(),
+      },
+    },
     componentNo: `Co-${modelNo}`,
     modelNo,
     modelNumber: `Shaft-${modelNo}`,
@@ -287,6 +393,48 @@ function normalizeSummary(payload: unknown, statuses: PlcPinStatus[]) {
   return summarizePins(statuses);
 }
 
+function normalizeRtc(value: unknown): InspectionRtc | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const year = numberValue(record.year);
+  const month = numberValue(record.month);
+  const day = numberValue(record.day);
+  const hour = numberValue(record.hour);
+  const minute = numberValue(record.minute);
+  const second = numberValue(record.second);
+  if (year === null || month === null || day === null || hour === null || minute === null || second === null) return null;
+
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+    millisecond: numberValue(record.millisecond) ?? undefined,
+    dayOfWeek: numberValue(record.dayOfWeek) ?? undefined,
+    epochSeconds: textValue(record.epochSeconds, ""),
+  };
+}
+
+function normalizeCommon(payload: unknown, header: InspectionHeader): InspectionCommon {
+  const root = asPayloadRecord(payload);
+  const raw = root?.raw && typeof root.raw === "object" ? root.raw as Record<string, unknown> : null;
+  const common = raw?.common && typeof raw.common === "object"
+    ? raw.common as Record<string, unknown>
+    : root?.common && typeof root.common === "object"
+      ? root.common as Record<string, unknown>
+      : {};
+
+  return {
+    shift: numberValue(common.shift) ?? "-",
+    operator: textValue(common.operator, header.operatorId),
+    modelNo: textValue(common.modelNo ?? root?.modelNo, NONE_MODEL_NO),
+    componentNo: textValue(common.componentNo ?? root?.componentNo, header.componentNo),
+    rtc: normalizeRtc(common.rtc),
+  };
+}
+
 async function readFromBackend() {
   const backendUrl = normalizeBackendUrl();
 
@@ -297,11 +445,13 @@ async function readFromBackend() {
     const payload = await response.json();
     const plcConnected = backendPlcConnected(payload);
     const statuses = plcConnected ? normalizePinStatuses(payload) : EMPTY_PIN_STATUSES;
+    const header = normalizeHeader(payload);
     return {
       backendUrl,
       connected: plcConnected,
       payload,
-      header: normalizeHeader(payload),
+      header,
+      common: normalizeCommon(payload, header),
       statuses,
       summary: plcConnected ? normalizeSummary(payload, statuses) : { total: 0, ok: 0, ng: 0 },
       updatedAt: normalizeBackendUpdatedAt(payload),
@@ -319,10 +469,11 @@ async function readFromBackend() {
       connected: false,
       payload: null,
       header: EMPTY_HEADER,
+      common: normalizeCommon(null, EMPTY_HEADER),
       statuses: EMPTY_PIN_STATUSES,
       summary: { total: 0, ok: 0, ng: 0 },
       updatedAt: new Date().toISOString(),
-      modelNo: "-",
+      modelNo: NONE_MODEL_NO,
       modelNumber: "-",
       actuals: {},
       holes3: EMPTY_SMALL_PIN_STATUSES,
@@ -358,7 +509,7 @@ function normalizeActuals(payload: unknown): InspectionValueMap {
 }
 
 function normalizeStatusArray(payload: unknown, keys: string[], count: number): PlcPinStatus[] {
-  if (!payload || typeof payload !== "object") return Array.from({ length: count }, () => null);
+  if (!payload || typeof payload !== "object") return Array.from({ length: count }, () => 0);
   const root = payload as Record<string, unknown>;
   const pinStatuses = root.pinStatuses && typeof root.pinStatuses === "object"
     ? root.pinStatuses as Record<string, unknown>
@@ -371,20 +522,20 @@ function normalizeStatusArray(payload: unknown, keys: string[], count: number): 
     }
   }
 
-  return Array.from({ length: count }, () => null);
+  return Array.from({ length: count }, () => 0);
 }
 
-function emptyStation3() {
+function emptyStation3(): NonNullable<InspectionApiPayload["station3"]> {
   return {
-    marking2d: null,
-    topEngraving: null,
-    sideEngraving: null,
+    marking2d: 0,
+    topEngraving: 0,
+    sideEngraving: 0,
     qrVerifierValue: "",
     qrGrade: null,
   };
 }
 
-function normalizeStation3(payload: unknown) {
+function normalizeStation3(payload: unknown): NonNullable<InspectionApiPayload["station3"]> {
   const root = asPayloadRecord(payload);
   const station3 = root?.station3 && typeof root.station3 === "object"
     ? root.station3 as Record<string, unknown>
@@ -401,6 +552,35 @@ function normalizeStation3(payload: unknown) {
   };
 }
 
+function normalizeStatusRegisters(payload: unknown): NonNullable<InspectionApiPayload["statusRegisters"]> {
+  const root = asPayloadRecord(payload);
+  const statusRegisters = root?.statusRegisters && typeof root.statusRegisters === "object"
+    ? root.statusRegisters as Record<string, unknown>
+    : null;
+  const station1 = statusRegisters?.station1 && typeof statusRegisters.station1 === "object"
+    ? statusRegisters.station1 as Record<string, unknown>
+    : null;
+  const station3 = normalizeStation3({
+    station3: statusRegisters?.station3 ?? root?.station3,
+  });
+
+  return {
+    station1: {
+      presence3d: statusFromReading(station1?.presence3d) ?? 0,
+    },
+    station2: {
+      holes15: normalizePinStatuses(payload),
+      holes3: normalizeStatusArray(payload, ["holes3"], SMALL_PIN_COUNT),
+      special: normalizeStatusArray(payload, ["special"], SMALL_PIN_COUNT),
+    },
+    station3: {
+      marking2d: station3.marking2d,
+      topEngraving: station3.topEngraving,
+      sideEngraving: station3.sideEngraving,
+    },
+  };
+}
+
 export async function getInspectionData(modelNo?: string | null): Promise<InspectionApiPayload> {
   const requestedModelNo = (modelNo ?? CURRENT_MODEL_NO).replace(/[^0-9]/g, "");
   const normalizedModelNo: InspectionModelNo = requestedModelNo || CURRENT_MODEL_NO;
@@ -410,10 +590,11 @@ export async function getInspectionData(modelNo?: string | null): Promise<Inspec
 
   const backend = await readFromBackend();
   const backendModelNo = backend.modelNo.replace(/[^0-9]/g, "") || normalizedModelNo;
-  const backendModelNumber = backend.modelNumber !== "-" ? backend.modelNumber : `Shaft-${backendModelNo}`;
+  const backendModelNumber = backendModelNo === NONE_MODEL_NO ? "-" : backend.modelNumber !== "-" ? backend.modelNumber : `Shaft-${backendModelNo}`;
 
   return {
     header: backend.header,
+    common: backend.common,
     componentNo: backend.header.componentNo,
     modelNo: backendModelNo,
     modelNumber: backendModelNumber,
@@ -423,6 +604,7 @@ export async function getInspectionData(modelNo?: string | null): Promise<Inspec
       holes3: backend.holes3,
       special: backend.special,
     },
+    statusRegisters: normalizeStatusRegisters(backend.payload),
     station3: backend.station3,
     summary: backend.summary,
     source: {

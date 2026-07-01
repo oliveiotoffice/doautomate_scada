@@ -2,7 +2,7 @@ const net = require("net");
 
 const DEFAULTS = {
   host: "192.168.3.39",
-  port: 5011,
+  port: 5014,
   device: "D",
   networkNo: 0x00,
   pcNo: 0xff,
@@ -30,16 +30,16 @@ const DEVICE_CODES = {
 };
 
 const AREA_START = 10000;
-const AREA_END = 10399;
+const AREA_END = 10699;
 const AREA_COUNT = AREA_END - AREA_START + 1;
 
 const STATION_OFFSETS = {
   1: 100,
-  2: 150,
-  3: 200,
-  4: 250,
-  5: 300,
-  6: 350,
+  2: 200,
+  3: 300,
+  4: 400,
+  5: 500,
+  6: 600,
 };
 
 function envNumber(key, fallback) {
@@ -99,6 +99,24 @@ function uint32ToWords(value) {
 
 function wordsToUInt32(lowWord, highWord) {
   return ((highWord || 0) * 0x10000) + (lowWord || 0);
+}
+
+function uint64ToWords(value) {
+  let number = BigInt(value || 0);
+  const words = [];
+  for (let index = 0; index < 4; index += 1) {
+    words.push(Number(number & 0xffffn));
+    number >>= 16n;
+  }
+  return words;
+}
+
+function wordsToUInt64(words) {
+  let value = 0n;
+  for (let index = 3; index >= 0; index -= 1) {
+    value = (value << 16n) + BigInt(words[index] || 0);
+  }
+  return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value.toString();
 }
 
 function stringToWords(text, registers = 10) {
@@ -441,9 +459,11 @@ module.exports = {
   setWords,
   stringToWords,
   uint32ToWords,
+  uint64ToWords,
   wordsToDateTime,
   wordsToFloat,
   wordsToString,
   wordsToUInt32,
+  wordsToUInt64,
   writeWordsInChunks,
 };
